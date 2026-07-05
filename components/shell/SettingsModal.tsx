@@ -6,6 +6,7 @@ import type { OrgUnit, TeamMember } from "@/lib/seed-data";
 import type { ProjectConfig } from "@/lib/data/project";
 import { updateProjectSettings, deleteOrgUnit } from "@/lib/actions/settings";
 import { deleteTeamMember } from "@/lib/actions/resources";
+import { loadSettingsData } from "@/lib/actions/settingsData";
 import { TeamMemberModal } from "@/components/resources/TeamMemberModal";
 import { OrgUnitModal } from "@/components/shell/OrgUnitModal";
 import { DeleteButton } from "@/components/ui/DeleteButton";
@@ -13,19 +14,22 @@ import { DeleteButton } from "@/components/ui/DeleteButton";
 const TABS = ["project", "team", "organization"] as const;
 type Tab = (typeof TABS)[number];
 
-export function SettingsButton({
-  project,
-  team,
-  orgUnits,
-}: {
-  project: ProjectConfig;
-  team: TeamMember[];
-  orgUnits: OrgUnit[];
-}) {
+export function SettingsButton({ project }: { project: ProjectConfig }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("project");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Fetched on demand when the modal opens, not on every page navigation.
+  const [data, setData] = useState<{ team: TeamMember[]; orgUnits: OrgUnit[] } | null>(null);
+  const [loadingData, setLoadingData] = useState(false);
+
+  async function handleOpen() {
+    setOpen(true);
+    if (data) return;
+    setLoadingData(true);
+    setData(await loadSettingsData(project.id));
+    setLoadingData(false);
+  }
 
   async function handleSave(formData: FormData) {
     setPending(true);
@@ -35,9 +39,12 @@ export function SettingsButton({
     if (result?.error) setError(result.error);
   }
 
+  const team = data?.team ?? [];
+  const orgUnits = data?.orgUnits ?? [];
+
   return (
     <>
-      <button className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>
+      <button className="btn btn-ghost btn-sm" onClick={handleOpen}>
         <i className="fa fa-gear" /> Settings
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Project Settings" size="lg">
@@ -100,7 +107,11 @@ export function SettingsButton({
             </div>
           </form>
         )}
-        {tab === "team" && (
+        {tab !== "project" && loadingData ? (
+          <div className="empty-state text-sm">
+            <p>Loading…</p>
+          </div>
+        ) : tab === "team" ? (
           <div style={{ marginTop: 8 }}>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
               <TeamMemberModal
@@ -148,8 +159,7 @@ export function SettingsButton({
               </tbody>
             </table>
           </div>
-        )}
-        {tab === "organization" && (
+        ) : tab === "organization" ? (
           <div style={{ marginTop: 8 }}>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
               <OrgUnitModal
@@ -201,7 +211,7 @@ export function SettingsButton({
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </Modal>
     </>
   );

@@ -15,43 +15,29 @@ export type ProjectConfig = {
 
 // cache() dedupes this within a single request — (app)/layout.tsx and every
 // page both call it, but it only hits Supabase once per request.
+//
+// Performance note: this used to be 3-4 sequential round trips (getUser,
+// profile lookup, membership/id lookup, project detail lookup), which was
+// the dominant cost on every navigation. getClaims() verifies the JWT
+// locally (no network call, since this project uses asymmetric signing
+// keys) and get_my_current_project() collapses the rest into one RPC call.
 export const getCurrentProject = cache(async (): Promise<ProjectConfig | null> => {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
+  if (!claims) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("is_super_admin")
-    .eq("id", user.id)
-    .single();
-
-  const isSuperAdmin = profile?.is_super_admin ?? false;
-
-  let projectId: string | null = null;
-  if (isSuperAdmin) {
-    const { data } = await supabase.from("projects").select("id").limit(1).maybeSingle();
-    projectId = data?.id ?? null;
-  } else {
-    const { data } = await supabase
-      .from("project_members")
-      .select("project_id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-    projectId = data?.project_id ?? null;
-  }
-
-  if (!projectId) return null;
-
-  const { data: project } = await supabase
-    .from("projects")
-    .select("id,name,client,erp_system,go_live_date,issue_prefix,budget")
-    .eq("id", projectId)
-    .single();
+  const { data: project } = await supabase.rpc("get_my_current_project").single<{
+    id: string;
+    name: string;
+    client: string | null;
+    erp_system: string | null;
+    go_live_date: string | null;
+    issue_prefix: string;
+    budget: number;
+    is_super_admin: boolean;
+  }>();
   if (!project) return null;
 
   return {
@@ -62,7 +48,7 @@ export const getCurrentProject = cache(async (): Promise<ProjectConfig | null> =
     goLive: project.go_live_date ?? "",
     prefix: project.issue_prefix,
     budget: Number(project.budget),
-    isSuperAdmin,
-    userEmail: user.email ?? "",
+    isSuperAdmin: project.is_super_admin,
+    userEmail: (claims.email as string) ?? "",
   };
 });

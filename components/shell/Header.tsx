@@ -3,17 +3,8 @@ import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { SettingsButton } from "@/components/shell/SettingsModal";
 import { SignOutButton } from "@/components/shell/SignOutButton";
 import type { ProjectConfig } from "@/lib/data/project";
-import type { OrgUnit, TeamMember } from "@/lib/seed-data";
 
-export function Header({
-  project,
-  team,
-  orgUnits,
-}: {
-  project: ProjectConfig;
-  team: TeamMember[];
-  orgUnits: OrgUnit[];
-}) {
+export function Header({ project }: { project: ProjectConfig }) {
   return (
     <div id="header">
       <div className="header-project">
@@ -32,7 +23,7 @@ export function Header({
       </div>
       <div className="header-actions">
         <ThemeToggle />
-        <SettingsButton project={project} team={team} orgUnits={orgUnits} />
+        <SettingsButton project={project} />
         <SignOutButton />
       </div>
     </div>

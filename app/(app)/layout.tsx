@@ -2,7 +2,6 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { Header } from "@/components/shell/Header";
 import { SignOutButton } from "@/components/shell/SignOutButton";
 import { getCurrentProject } from "@/lib/data/project";
-import { getSettingsData } from "@/lib/data/settings";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const project = await getCurrentProject();
@@ -24,13 +23,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const { team, orgUnits } = await getSettingsData(project.id);
-
   return (
     <>
       <Sidebar />
       <div id="main">
-        <Header project={project} team={team} orgUnits={orgUnits} />
+        <Header project={project} />
         <div id="content">{children}</div>
       </div>
       <div id="toast-container" />

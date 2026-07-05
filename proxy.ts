@@ -26,9 +26,11 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() verifies the JWT locally (this project uses asymmetric
+  // signing keys) instead of round-tripping to the Auth server like
+  // getUser() always does — cuts real, measured latency on every request.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims;
 
   const isLoginRoute = request.nextUrl.pathname.startsWith("/login");
 

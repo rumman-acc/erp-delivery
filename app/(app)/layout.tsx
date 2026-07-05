@@ -2,6 +2,7 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { Header } from "@/components/shell/Header";
 import { SignOutButton } from "@/components/shell/SignOutButton";
 import { getCurrentProject } from "@/lib/data/project";
+import { canViewModule } from "@/lib/permissions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const project = await getCurrentProject();
@@ -23,9 +24,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
+  const showAgentNav = await canViewModule(project.id, "agent");
+
   return (
     <>
-      <Sidebar />
+      <Sidebar showAgentNav={showAgentNav} />
       <div id="main">
         <Header project={project} />
         <div id="content">{children}</div>

@@ -11,8 +11,10 @@ const NAV_ITEMS = [
   { href: "/risks", icon: "fa-triangle-exclamation", label: "Risks & Issues" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ showAgentNav }: { showAgentNav: boolean }) {
   const pathname = usePathname();
+
+  const items = showAgentNav ? [...NAV_ITEMS, { href: "/agent", icon: "fa-robot", label: "AI Agent" }] : NAV_ITEMS;
 
   return (
     <div id="sidebar">
@@ -21,7 +23,7 @@ export function Sidebar() {
         ERP Delivery
       </div>
       <nav>
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}

@@ -86,3 +86,90 @@ export async function getMe(accessToken: string): Promise<MicrosoftProfile> {
   }
   return res.json();
 }
+
+export type GraphEvent = {
+  id: string;
+  subject: string;
+  organizer: { emailAddress: { address: string; name: string } };
+  start: { dateTime: string; timeZone: string };
+  end: { dateTime: string; timeZone: string };
+  isOnlineMeeting: boolean;
+  onlineMeeting: { joinUrl: string } | null;
+};
+
+// plan-agentic.md §5 step 2 — a rolling window, not the admin's whole
+// calendar history, and filtered to Teams online meetings only.
+export async function listOnlineMeetings(accessToken: string): Promise<GraphEvent[]> {
+  const now = new Date();
+  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const params = new URLSearchParams({
+    startDateTime: start,
+    endDateTime: end,
+    $select: "id,subject,organizer,start,end,isOnlineMeeting,onlineMeeting",
+    $orderby: "start/dateTime",
+    $top: "50",
+  });
+
+  const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Prefer: 'outlook.timezone="UTC"' },
+  });
+  if (!res.ok) {
+    throw new Error(`Microsoft Graph /me/calendarView returned ${res.status}: ${await res.text()}`);
+  }
+  const body: { value: GraphEvent[] } = await res.json();
+  return body.value.filter((e) => e.isOnlineMeeting);
+}
+
+// A calendar event only carries a joinUrl — the transcripts API needs the
+// actual onlineMeeting ID, resolved via this documented lookup-by-joinUrl
+// pattern (plan-agentic.md Phase 3).
+export async function resolveOnlineMeetingId(accessToken: string, joinUrl: string): Promise<string | null> {
+  // OData string literals escape a single quote by doubling it.
+  const escapedJoinUrl = joinUrl.replace(/'/g, "''");
+  const params = new URLSearchParams({ $filter: `JoinWebUrl eq '${escapedJoinUrl}'` });
+
+  const res = await fetch(`https://graph.microsoft.com/v1.0/me/onlineMeetings?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Microsoft Graph /me/onlineMeetings returned ${res.status}: ${await res.text()}`);
+  }
+  const body: { value: { id: string }[] } = await res.json();
+  return body.value[0]?.id ?? null;
+}
+
+export type TranscriptMetadata = { id: string; createdDateTime: string };
+
+// Metadata only — no content download here on purpose (see the Phase 3
+// scope note: raw transcript text is never persisted, only ever held in
+// memory for the single request that extracts from it, which is Phase 4).
+export async function listTranscripts(accessToken: string, onlineMeetingId: string): Promise<TranscriptMetadata[]> {
+  const res = await fetch(`https://graph.microsoft.com/v1.0/me/onlineMeetings/${onlineMeetingId}/transcripts`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 404) return []; // no transcript generated (yet, or ever)
+  if (!res.ok) {
+    throw new Error(`Microsoft Graph transcripts endpoint returned ${res.status}: ${await res.text()}`);
+  }
+  const body: { value: TranscriptMetadata[] } = await res.json();
+  return body.value;
+}
+
+// Content download deferred to Phase 4 by design — declared here so the
+// contract is visible next to listTranscripts, not called yet.
+export async function getTranscriptContent(
+  accessToken: string,
+  onlineMeetingId: string,
+  transcriptId: string
+): Promise<string> {
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/me/onlineMeetings/${onlineMeetingId}/transcripts/${transcriptId}/content?$format=text/vtt`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) {
+    throw new Error(`Microsoft Graph transcript content endpoint returned ${res.status}: ${await res.text()}`);
+  }
+  return res.text();
+}

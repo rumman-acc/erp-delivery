@@ -32,6 +32,13 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
+  // Machine-to-machine endpoints authenticate via their own bearer secret
+  // (checked inside the route handler itself), not a browser session — a
+  // cron scheduler has no cookies to present here at all.
+  if (request.nextUrl.pathname.startsWith("/api/cron/")) {
+    return response;
+  }
+
   const isLoginRoute = request.nextUrl.pathname.startsWith("/login");
 
   if (!user && !isLoginRoute) {

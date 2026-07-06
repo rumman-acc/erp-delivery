@@ -10,6 +10,15 @@ export function formatDate(d: string | null | undefined): string {
   }
 }
 
+export function formatDateTime(d: string | null | undefined): string {
+  if (!d) return "";
+  try {
+    return new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return d;
+  }
+}
+
 export function avatarInitials(name: string | null | undefined): string {
   if (!name) return "?";
   const parts = name.trim().split(" ");

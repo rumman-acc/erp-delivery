@@ -1,7 +1,9 @@
 import { getCurrentProject } from "@/lib/data/project";
-import { getMyConnection } from "@/lib/data/agent";
+import { getMyConnection, getMyMeetings, getLinkedMeetings } from "@/lib/data/agent";
 import { canViewModule } from "@/lib/permissions";
 import { ConnectionCard } from "@/components/agent/ConnectionCard";
+import { MeetingsList } from "@/components/agent/MeetingsList";
+import { LinkedMeetingsList } from "@/components/agent/LinkedMeetingsList";
 
 const ERROR_MESSAGES: Record<string, string> = {
   microsoft_denied: "Microsoft sign-in was cancelled or denied.",
@@ -17,8 +19,7 @@ export default async function AgentPage({
   const project = await getCurrentProject();
   if (!project) return null;
 
-  const [connection, params, canView] = await Promise.all([getMyConnection(), searchParams, canViewModule(project.id, "agent")]);
-
+  const canView = await canViewModule(project.id, "agent");
   if (!canView) {
     return (
       <div className="page active" id="page-agent">
@@ -29,6 +30,13 @@ export default async function AgentPage({
       </div>
     );
   }
+
+  const [connection, meetingsResult, linkedMeetings, params] = await Promise.all([
+    getMyConnection(),
+    getMyMeetings(project.id),
+    getLinkedMeetings(project.id),
+    searchParams,
+  ]);
 
   return (
     <div className="page active" id="page-agent">
@@ -55,15 +63,16 @@ export default async function AgentPage({
             <i className="fa fa-calendar-days" /> Your Meetings
           </span>
         </div>
-        {connection ? (
-          <div className="empty-state text-sm">
-            <p>Meeting browsing and linking is coming in the next phase of this build.</p>
-          </div>
-        ) : (
-          <div className="empty-state text-sm">
-            <p>Connect your Microsoft account above to see your Teams meetings here.</p>
-          </div>
-        )}
+        <MeetingsList projectId={project.id} result={meetingsResult} />
+      </div>
+
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-header">
+          <span className="card-title">
+            <i className="fa fa-link" /> Linked Meetings
+          </span>
+        </div>
+        <LinkedMeetingsList meetings={linkedMeetings} />
       </div>
 
       <div className="card">

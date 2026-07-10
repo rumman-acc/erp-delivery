@@ -143,14 +143,18 @@ export async function getLinkedMeetings(projectId: string): Promise<LinkedMeetin
   }));
 }
 
-export type SuggestionRow = {
-  id: string;
-  description: string;
-  type: string;
-  priority: string;
-  supportingQuote: string | null;
-  confidence: "high" | "medium" | "low" | null;
-};
+type Confidence = "high" | "medium" | "low" | null;
+type Common = { id: string; supportingQuote: string | null; confidence: Confidence };
+
+// Mirrors ExtractedSuggestion (lib/claude/extractSuggestions.ts) — the
+// `payload` column stores exactly these fields per type (see
+// pollMeetings.ts's toSuggestionRow), so this is a straight passthrough.
+export type SuggestionRow =
+  | (Common & { suggestionType: "requirement"; description: string; reqType: string; priority: string })
+  | (Common & { suggestionType: "new_process"; name: string; suggestedCode: string; level: 1 | 2 | 3; description: string; priority: string })
+  | (Common & { suggestionType: "action_item"; title: string; priority: string; dueDate: string | null })
+  | (Common & { suggestionType: "risk"; description: string; category: string; probability: string; impact: string; mitigation: string })
+  | (Common & { suggestionType: "issue"; description: string; category: string; severity: string; rootCause: string });
 
 export type SuggestionBatch = {
   batchId: string;
@@ -160,13 +164,14 @@ export type SuggestionBatch = {
   suggestions: SuggestionRow[];
 };
 
-// plan-agentic.md §5 step 5 — one batch per meeting, any project Admin can
-// review it (not just the admin whose Outlook account sourced the meeting).
+// plan-agentic.md §5 step 5 (generalized, §10 step 7) — one batch per
+// meeting, mixing whichever suggestion types were found; any project Admin
+// can review it (not just the admin whose Outlook account sourced the meeting).
 export async function getPendingSuggestionBatches(projectId: string): Promise<SuggestionBatch[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("agent_suggestions")
-    .select("id,batch_id,meeting_source_id,payload,supporting_quote,confidence,meeting_sources(subject,start_time)")
+    .select("id,batch_id,meeting_source_id,suggestion_type,payload,supporting_quote,confidence,meeting_sources(subject,start_time)")
     .eq("project_id", projectId)
     .eq("status", "pending")
     .order("created_at");
@@ -184,15 +189,10 @@ export async function getPendingSuggestionBatches(projectId: string): Promise<Su
         suggestions: [],
       });
     }
-    const payload = r.payload as { description: string; type: string; priority: string };
-    batches.get(r.batch_id)!.suggestions.push({
-      id: r.id,
-      description: payload.description,
-      type: payload.type,
-      priority: payload.priority,
-      supportingQuote: r.supporting_quote,
-      confidence: r.confidence as SuggestionRow["confidence"],
-    });
+    const payload = r.payload as Record<string, unknown>;
+    const common: Common = { id: r.id, supportingQuote: r.supporting_quote, confidence: r.confidence as Confidence };
+    const row = { ...common, suggestionType: r.suggestion_type, ...payload } as SuggestionRow;
+    batches.get(r.batch_id)!.suggestions.push(row);
   }
 
   return [...batches.values()];

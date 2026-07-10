@@ -17,9 +17,16 @@ export default function LoginPage() {
     const supabase = createClient();
     // Azure AD app registration is Single tenant (accelance.io only) — the
     // tenant itself is the access gate, not anything in this app's code.
+    // Supabase's Azure provider defaults to `scope=openid` only, which
+    // returns no email claim — explicit "email profile" is what makes
+    // Microsoft's response include the address Supabase needs to create
+    // the user (without it: "Error getting user email from external provider").
     await supabase.auth.signInWithOAuth({
       provider: "azure",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        scopes: "openid email profile",
+      },
     });
   }
 

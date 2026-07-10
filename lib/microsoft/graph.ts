@@ -27,7 +27,6 @@ export function buildAuthorizationUrl(state: string): string {
     response_mode: "query",
     scope: SCOPES,
     state,
-    prompt: "consent",
   });
   return `${authority()}/oauth2/v2.0/authorize?${params.toString()}`;
 }

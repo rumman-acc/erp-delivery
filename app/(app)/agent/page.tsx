@@ -1,9 +1,18 @@
 import { getCurrentProject } from "@/lib/data/project";
-import { getMyConnection, getMyMeetings, getLinkedMeetings } from "@/lib/data/agent";
+import {
+  getMyConnection,
+  getMyMeetings,
+  getLinkedMeetings,
+  getPendingSuggestionBatches,
+  getProjectProcesses,
+  getAgentAuditLog,
+} from "@/lib/data/agent";
 import { canViewModule } from "@/lib/permissions";
 import { ConnectionCard } from "@/components/agent/ConnectionCard";
 import { MeetingsList } from "@/components/agent/MeetingsList";
 import { LinkedMeetingsList } from "@/components/agent/LinkedMeetingsList";
+import { ReviewQueue } from "@/components/agent/ReviewQueue";
+import { AuditLogTable } from "@/components/agent/AuditLogTable";
 
 const ERROR_MESSAGES: Record<string, string> = {
   microsoft_denied: "Microsoft sign-in was cancelled or denied.",
@@ -31,10 +40,15 @@ export default async function AgentPage({
     );
   }
 
-  const [connection, meetingsResult, linkedMeetings, params] = await Promise.all([
+  const [connection, meetingsResult, linkedMeetings, suggestionBatches, processes, auditLog, params] = await Promise.all([
     getMyConnection(),
     getMyMeetings(project.id),
     getLinkedMeetings(project.id),
+    getPendingSuggestionBatches(project.id),
+    getProjectProcesses(project.id),
+    // RLS restricts this to Super Admin anyway, but skip the round trip for
+    // everyone else rather than firing a query that will just come back empty.
+    project.isSuperAdmin ? getAgentAuditLog(project.id) : Promise.resolve([]),
     searchParams,
   ]);
 
@@ -75,16 +89,23 @@ export default async function AgentPage({
         <LinkedMeetingsList meetings={linkedMeetings} />
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">
-            <i className="fa fa-list-check" /> Review Queue
-          </span>
-        </div>
-        <div className="empty-state text-sm">
-          <p>Extracted suggestions from processed meetings will show up here for approval.</p>
-        </div>
+      <div style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: 14, marginBottom: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <i className="fa fa-list-check" /> Review Queue
+        </h3>
+        <ReviewQueue projectId={project.id} batches={suggestionBatches} processes={processes} />
       </div>
+
+      {project.isSuperAdmin && (
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">
+              <i className="fa fa-shield-halved" /> Audit Log
+            </span>
+          </div>
+          <AuditLogTable entries={auditLog} />
+        </div>
+      )}
     </div>
   );
 }

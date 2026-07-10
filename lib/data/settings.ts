@@ -1,6 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
 import type { OrgUnit, TeamMember } from "@/lib/seed-data";
 
+export type ProjectMember = {
+  userId: string;
+  roleId: string;
+  email: string;
+  fullName: string;
+  roleName: string;
+};
+
+export type RoleOption = { id: string; name: string };
+
 export async function getSettingsData(projectId: string) {
   const supabase = await createClient();
   const [teamRes, orgUnitsRes] = await Promise.all([
@@ -37,4 +47,34 @@ export async function getSettingsData(projectId: string) {
   }));
 
   return { team, orgUnits };
+}
+
+// project_members has two FKs into profiles (user_id, invited_by), so the
+// embed needs the !user_id hint to disambiguate which one PostgREST joins on.
+export async function getUsersData(projectId: string): Promise<{ members: ProjectMember[]; roles: RoleOption[] }> {
+  const supabase = await createClient();
+  const [membersRes, rolesRes] = await Promise.all([
+    supabase
+      .from("project_members")
+      .select("user_id, role_id, profiles!user_id(email, full_name), roles(name)")
+      .eq("project_id", projectId)
+      .order("created_at"),
+    supabase.from("roles").select("id, name").order("name"),
+  ]);
+
+  const members: ProjectMember[] = (membersRes.data ?? []).map((m) => {
+    const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+    const role = Array.isArray(m.roles) ? m.roles[0] : m.roles;
+    return {
+      userId: m.user_id,
+      roleId: m.role_id,
+      email: profile?.email ?? "",
+      fullName: profile?.full_name ?? "",
+      roleName: role?.name ?? "",
+    };
+  });
+
+  const roles: RoleOption[] = (rolesRes.data ?? []).map((r) => ({ id: r.id, name: r.name }));
+
+  return { members, roles };
 }

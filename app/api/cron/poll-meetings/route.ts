@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getValidAccessTokenForConnection } from "@/lib/microsoft/connection";
-import { resolveOnlineMeetingId, listTranscripts } from "@/lib/microsoft/graph";
+import { resolveOnlineMeetingId, listTranscripts, getTranscriptContent } from "@/lib/microsoft/graph";
+import { extractRequirements } from "@/lib/claude/extractRequirements";
 
 // Polled by an external scheduler every 5-10 minutes (plan-agentic.md §9).
 // Detects that a linked, ended meeting now has a transcript available —
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const results = { checked: 0, fetched: 0, stillPending: 0, errors: 0 };
+  const results = { checked: 0, fetched: 0, stillPending: 0, errors: 0, suggestionsCreated: 0 };
   // Avoid refreshing the same connection's token once per meeting when one
   // admin has multiple linked meetings ready to check in the same run.
   const tokenCache = new Map<string, string | null>();
@@ -71,6 +72,29 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
+      // Only ever held in memory for this one extraction call — never
+      // written to the database (plan-agentic.md §6/§10 step 6).
+      const transcriptText = await getTranscriptContent(accessToken, onlineMeetingId, transcripts[0].id);
+      const extracted = await extractRequirements(transcriptText);
+
+      const batchId = crypto.randomUUID();
+      if (extracted.length > 0) {
+        const { error: insertError } = await supabase.from("agent_suggestions").insert(
+          extracted.map((r) => ({
+            meeting_source_id: meeting.id,
+            project_id: meeting.project_id,
+            suggestion_type: "requirement",
+            origin: "agent",
+            payload: { description: r.description, type: r.type, priority: r.priority },
+            original_payload: { description: r.description, type: r.type, priority: r.priority },
+            supporting_quote: r.supportingQuote,
+            confidence: r.confidence,
+            batch_id: batchId,
+          }))
+        );
+        if (insertError) throw insertError;
+      }
+
       await supabase
         .from("meeting_sources")
         .update({ transcript_status: "fetched", transcript_fetched_at: new Date().toISOString() })
@@ -79,12 +103,14 @@ export async function GET(request: NextRequest) {
       await supabase.from("agent_audit_log").insert({
         project_id: meeting.project_id,
         actor_type: "agent",
-        action: "transcript.detected",
+        action: "suggestions.created",
         entity_type: "meeting_sources",
         entity_id: meeting.id,
+        details: { batch_id: batchId, count: extracted.length },
       });
 
       results.fetched++;
+      results.suggestionsCreated += extracted.length;
     } catch (err) {
       console.error(`poll-meetings: error processing meeting_sources.id=${meeting.id}:`, err);
       await supabase.from("meeting_sources").update({ transcript_status: "error" }).eq("id", meeting.id);

@@ -142,3 +142,107 @@ export async function getLinkedMeetings(projectId: string): Promise<LinkedMeetin
     transcriptFetchedAt: m.transcript_fetched_at,
   }));
 }
+
+export type SuggestionRow = {
+  id: string;
+  description: string;
+  type: string;
+  priority: string;
+  supportingQuote: string | null;
+  confidence: "high" | "medium" | "low" | null;
+};
+
+export type SuggestionBatch = {
+  batchId: string;
+  meetingSourceId: string;
+  meetingSubject: string;
+  meetingStartTime: string;
+  suggestions: SuggestionRow[];
+};
+
+// plan-agentic.md §5 step 5 — one batch per meeting, any project Admin can
+// review it (not just the admin whose Outlook account sourced the meeting).
+export async function getPendingSuggestionBatches(projectId: string): Promise<SuggestionBatch[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("agent_suggestions")
+    .select("id,batch_id,meeting_source_id,payload,supporting_quote,confidence,meeting_sources(subject,start_time)")
+    .eq("project_id", projectId)
+    .eq("status", "pending")
+    .order("created_at");
+
+  const batches = new Map<string, SuggestionBatch>();
+
+  for (const r of data ?? []) {
+    const meeting = Array.isArray(r.meeting_sources) ? r.meeting_sources[0] : r.meeting_sources;
+    if (!batches.has(r.batch_id)) {
+      batches.set(r.batch_id, {
+        batchId: r.batch_id,
+        meetingSourceId: r.meeting_source_id,
+        meetingSubject: meeting?.subject ?? "Unknown meeting",
+        meetingStartTime: meeting?.start_time ?? "",
+        suggestions: [],
+      });
+    }
+    const payload = r.payload as { description: string; type: string; priority: string };
+    batches.get(r.batch_id)!.suggestions.push({
+      id: r.id,
+      description: payload.description,
+      type: payload.type,
+      priority: payload.priority,
+      supportingQuote: r.supporting_quote,
+      confidence: r.confidence as SuggestionRow["confidence"],
+    });
+  }
+
+  return [...batches.values()];
+}
+
+export type ProcessOption = { id: string; code: string; name: string };
+
+export async function getProjectProcesses(projectId: string): Promise<ProcessOption[]> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("processes").select("id,code,name").eq("project_id", projectId).order("code");
+  return data ?? [];
+}
+
+export type AuditLogEntry = {
+  id: string;
+  createdAt: string;
+  actorType: "agent" | "human";
+  actorName: string | null;
+  action: string;
+  entityType: string | null;
+  entityId: string | null;
+  details: Record<string, unknown> | null;
+};
+
+// plan-agentic.md §4 — full governance trail. RLS restricts SELECT to Super
+// Admin only, so this returns empty for anyone else regardless of the
+// project filter here (see agent_audit_log_select policy). Connection
+// events (connect/disconnect) never carry a project_id — they're tied to
+// the admin's own Microsoft account, not any one project — so this also
+// pulls project_id IS NULL rows to keep the trail complete.
+export async function getAgentAuditLog(projectId: string): Promise<AuditLogEntry[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("agent_audit_log")
+    .select("id,created_at,actor_type,action,entity_type,entity_id,details,profiles(full_name,email)")
+    .or(`project_id.eq.${projectId},project_id.is.null`)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  return (data ?? []).map((r) => {
+    const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
+    return {
+      id: r.id,
+      createdAt: r.created_at,
+      actorType: r.actor_type as AuditLogEntry["actorType"],
+      actorName: profile?.full_name || profile?.email || null,
+      action: r.action,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      details: r.details as Record<string, unknown> | null,
+    };
+  });
+}

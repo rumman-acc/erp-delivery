@@ -33,7 +33,6 @@ export function Sidebar({ showAgentNav }: { showAgentNav: boolean }) {
           </Link>
         ))}
       </nav>
-      <div className="sidebar-footer">v1.0</div>
     </div>
   );
 }

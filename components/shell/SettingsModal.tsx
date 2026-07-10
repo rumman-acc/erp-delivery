@@ -4,14 +4,16 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import type { OrgUnit, TeamMember } from "@/lib/seed-data";
 import type { ProjectConfig } from "@/lib/data/project";
+import type { ProjectMember, RoleOption } from "@/lib/data/settings";
 import { updateProjectSettings, deleteOrgUnit } from "@/lib/actions/settings";
 import { deleteTeamMember } from "@/lib/actions/resources";
-import { loadSettingsData } from "@/lib/actions/settingsData";
+import { loadSettingsData, loadUsersData } from "@/lib/actions/settingsData";
+import { inviteUser, removeMember } from "@/lib/actions/invites";
 import { TeamMemberModal } from "@/components/resources/TeamMemberModal";
 import { OrgUnitModal } from "@/components/shell/OrgUnitModal";
 import { DeleteButton } from "@/components/ui/DeleteButton";
 
-const TABS = ["project", "team", "organization"] as const;
+const TABS = ["project", "team", "organization", "users"] as const;
 type Tab = (typeof TABS)[number];
 
 export function SettingsButton({ project }: { project: ProjectConfig }) {
@@ -23,12 +25,40 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
   const [data, setData] = useState<{ team: TeamMember[]; orgUnits: OrgUnit[] } | null>(null);
   const [loadingData, setLoadingData] = useState(false);
 
+  // Only Super Admins ever open this tab, so it's fetched separately and
+  // lazily rather than bundled into the above.
+  const [usersData, setUsersData] = useState<{ members: ProjectMember[]; roles: RoleOption[] } | null>(null);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invitePending, setInvitePending] = useState(false);
+
   async function handleOpen() {
     setOpen(true);
     if (data) return;
     setLoadingData(true);
     setData(await loadSettingsData(project.id));
     setLoadingData(false);
+  }
+
+  async function handleTabClick(t: Tab) {
+    setTab(t);
+    if (t === "users" && !usersData) {
+      setLoadingUsers(true);
+      setUsersData(await loadUsersData(project.id));
+      setLoadingUsers(false);
+    }
+  }
+
+  async function handleInvite(formData: FormData) {
+    setInvitePending(true);
+    setInviteError(null);
+    const result = await inviteUser(project.id, formData);
+    setInvitePending(false);
+    if (result?.error) {
+      setInviteError(result.error);
+      return;
+    }
+    setUsersData(await loadUsersData(project.id));
   }
 
   async function handleSave(formData: FormData) {
@@ -49,11 +79,11 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Project Settings" size="lg">
         <div className="tab-bar">
-          {TABS.map((t) => (
+          {TABS.filter((t) => t !== "users" || project.isSuperAdmin).map((t) => (
             <div
               key={t}
               className={`tab-item${tab === t ? " active" : ""}`}
-              onClick={() => setTab(t)}
+              onClick={() => handleTabClick(t)}
             >
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </div>
@@ -107,7 +137,72 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
             </div>
           </form>
         )}
-        {tab !== "project" && loadingData ? (
+        {tab === "users" ? (
+          loadingUsers ? (
+            <div className="empty-state text-sm">
+              <p>Loading…</p>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              <form action={handleInvite} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <input
+                  className="input"
+                  name="email"
+                  type="email"
+                  placeholder="email@company.com"
+                  required
+                  style={{ flex: 1 }}
+                />
+                <select className="select" name="role_id" required style={{ width: 160 }}>
+                  {(usersData?.roles ?? []).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn btn-primary btn-sm" type="submit" disabled={invitePending}>
+                  <i className="fa fa-paper-plane" /> {invitePending ? "Inviting…" : "Invite"}
+                </button>
+              </form>
+              {inviteError && (
+                <div className="text-sm" style={{ color: "var(--danger)", marginBottom: 8 }}>
+                  {inviteError}
+                </div>
+              )}
+              {(usersData?.members ?? []).length === 0 ? (
+                <div className="empty-state text-sm">
+                  <p>No users on this project yet.</p>
+                </div>
+              ) : (
+                <table className="table-auto">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(usersData?.members ?? []).map((m) => (
+                      <tr key={m.userId}>
+                        <td>{m.fullName || "—"}</td>
+                        <td>{m.email}</td>
+                        <td>{m.roleName}</td>
+                        <td>
+                          <DeleteButton
+                            action={removeMember.bind(null, project.id, m.userId)}
+                            confirmText="Remove this user from the project?"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )
+        ) : tab !== "project" && loadingData ? (
           <div className="empty-state text-sm">
             <p>Loading…</p>
           </div>

@@ -17,6 +17,16 @@ export async function requireEdit(projectId: string, module: Module) {
   }
 }
 
+// Same friendly-precheck role as requireEdit — RLS (is_super_admin() in
+// every "_write_super_admin" policy) is the real boundary.
+export async function requireSuperAdmin() {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("is_super_admin");
+  if (error || !data) {
+    throw new Error("Forbidden");
+  }
+}
+
 // Used to decide whether to show nav/UI affordances at all — every existing
 // module defaults to can_view=true for the User role, so this hasn't
 // mattered until the 'agent' module (User role has no access to it at all).

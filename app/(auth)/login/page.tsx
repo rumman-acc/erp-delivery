@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { login } from "@/lib/actions/auth";
 
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, null);
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="auth-shell">
@@ -25,7 +26,34 @@ export default function LoginPage() {
             <label className="label" htmlFor="password">
               Password
             </label>
-            <input className="input" id="password" name="password" type="password" required />
+            <div style={{ position: "relative" }}>
+              <input
+                className="input"
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                required
+                style={{ paddingRight: 36 }}
+              />
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: 2,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 28,
+                  height: 28,
+                  border: "none",
+                  background: "transparent",
+                }}
+              >
+                <i className={showPassword ? "fa-solid fa-eye-slash" : "fa-solid fa-eye"} />
+              </button>
+            </div>
           </div>
           {state?.error && (
             <div className="text-sm" style={{ color: "var(--danger)" }}>

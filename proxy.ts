@@ -40,8 +40,13 @@ export async function proxy(request: NextRequest) {
   }
 
   const isLoginRoute = request.nextUrl.pathname.startsWith("/login");
+  // set-password is reached via an invite-email link that carries the
+  // session in the URL fragment (invisible to this server-side check) —
+  // the client establishes the session after mount, so this route must be
+  // reachable before `user` can possibly be set here.
+  const isSetPasswordRoute = request.nextUrl.pathname.startsWith("/set-password");
 
-  if (!user && !isLoginRoute) {
+  if (!user && !isLoginRoute && !isSetPasswordRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

@@ -1,69 +1,52 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { login } from "@/lib/actions/auth";
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  sso_failed: "Microsoft sign-in didn't complete — please try again.",
+};
 
 export default function LoginPage() {
-  const [state, formAction, pending] = useActionState(login, null);
-  const [showPassword, setShowPassword] = useState(false);
+  const [pending, setPending] = useState(false);
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const errorCode = params?.get("error") ?? null;
+
+  async function handleSignIn() {
+    setPending(true);
+    const supabase = createClient();
+    // Azure AD app registration is Single tenant (accelance.io only) — the
+    // tenant itself is the access gate, not anything in this app's code.
+    await supabase.auth.signInWithOAuth({
+      provider: "azure",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+  }
 
   return (
     <div className="auth-shell">
       <div className="card auth-card">
         <div className="card-header">
           <span className="card-title">
-            <i className="fa-solid fa-diagram-project" /> ERP Delivery — Sign In
+            <i className="fa-solid fa-diagram-project" /> ERP Delivery
           </span>
         </div>
-        <form action={formAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div className="form-group">
-            <label className="label" htmlFor="email">
-              Email
-            </label>
-            <input className="input" id="email" name="email" type="email" required autoFocus />
+        <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+          Sign in with your accelance.io Microsoft account.
+        </p>
+        {errorCode && (
+          <div className="text-sm" style={{ color: "var(--danger)", marginBottom: 12 }}>
+            {ERROR_MESSAGES[errorCode] ?? "Something went wrong signing in."}
           </div>
-          <div className="form-group">
-            <label className="label" htmlFor="password">
-              Password
-            </label>
-            <div style={{ position: "relative" }}>
-              <input
-                className="input"
-                id="password"
-                name="password"
-                type={showPassword ? "text" : "password"}
-                required
-                style={{ paddingRight: 36 }}
-              />
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                style={{
-                  position: "absolute",
-                  right: 2,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  width: 28,
-                  height: 28,
-                  border: "none",
-                  background: "transparent",
-                }}
-              >
-                <i className={showPassword ? "fa-solid fa-eye-slash" : "fa-solid fa-eye"} />
-              </button>
-            </div>
-          </div>
-          {state?.error && (
-            <div className="text-sm" style={{ color: "var(--danger)" }}>
-              {state.error}
-            </div>
-          )}
-          <button className="btn btn-primary" type="submit" disabled={pending}>
-            {pending ? "Signing in…" : "Sign In"}
-          </button>
-        </form>
+        )}
+        <button
+          className="btn btn-primary"
+          onClick={handleSignIn}
+          disabled={pending}
+          style={{ width: "100%", justifyContent: "center" }}
+        >
+          <i className="fa-brands fa-microsoft" /> {pending ? "Redirecting…" : "Sign in with Microsoft"}
+        </button>
       </div>
     </div>
   );

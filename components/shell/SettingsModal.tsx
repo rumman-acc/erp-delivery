@@ -4,11 +4,11 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import type { OrgUnit, TeamMember } from "@/lib/seed-data";
 import type { ProjectConfig } from "@/lib/data/project";
-import type { ProjectMember, RoleOption } from "@/lib/data/settings";
+import type { UserRow } from "@/lib/data/settings";
 import { updateProjectSettings, deleteOrgUnit } from "@/lib/actions/settings";
 import { deleteTeamMember } from "@/lib/actions/resources";
 import { loadSettingsData, loadUsersData } from "@/lib/actions/settingsData";
-import { inviteUser, removeMember } from "@/lib/actions/invites";
+import { setSuperAdmin } from "@/lib/actions/users";
 import { TeamMemberModal } from "@/components/resources/TeamMemberModal";
 import { OrgUnitModal } from "@/components/shell/OrgUnitModal";
 import { DeleteButton } from "@/components/ui/DeleteButton";
@@ -27,10 +27,10 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
 
   // Only Super Admins ever open this tab, so it's fetched separately and
   // lazily rather than bundled into the above.
-  const [usersData, setUsersData] = useState<{ members: ProjectMember[]; roles: RoleOption[] } | null>(null);
+  const [usersData, setUsersData] = useState<UserRow[] | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [invitePending, setInvitePending] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
 
   async function handleOpen() {
     setOpen(true);
@@ -44,21 +44,21 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
     setTab(t);
     if (t === "users" && !usersData) {
       setLoadingUsers(true);
-      setUsersData(await loadUsersData(project.id));
+      setUsersData(await loadUsersData());
       setLoadingUsers(false);
     }
   }
 
-  async function handleInvite(formData: FormData) {
-    setInvitePending(true);
-    setInviteError(null);
-    const result = await inviteUser(project.id, formData);
-    setInvitePending(false);
+  async function handleToggleSuperAdmin(userId: string, next: boolean) {
+    setTogglingUserId(userId);
+    setToggleError(null);
+    const result = await setSuperAdmin(userId, next);
+    setTogglingUserId(null);
     if (result?.error) {
-      setInviteError(result.error);
+      setToggleError(result.error);
       return;
     }
-    setUsersData(await loadUsersData(project.id));
+    setUsersData(await loadUsersData());
   }
 
   async function handleSave(formData: FormData) {
@@ -144,34 +144,18 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
             </div>
           ) : (
             <div style={{ marginTop: 8 }}>
-              <form action={handleInvite} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <input
-                  className="input"
-                  name="email"
-                  type="email"
-                  placeholder="email@company.com"
-                  required
-                  style={{ flex: 1 }}
-                />
-                <select className="select" name="role_id" required style={{ width: 160 }}>
-                  {(usersData?.roles ?? []).map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-                <button className="btn btn-primary btn-sm" type="submit" disabled={invitePending}>
-                  <i className="fa fa-paper-plane" /> {invitePending ? "Inviting…" : "Invite"}
-                </button>
-              </form>
-              {inviteError && (
+              <p className="text-sm text-muted" style={{ marginBottom: 12 }}>
+                Anyone signing in with an accelance.io Microsoft account gets an account automatically, as a Super
+                Admin by default. Narrow access here.
+              </p>
+              {toggleError && (
                 <div className="text-sm" style={{ color: "var(--danger)", marginBottom: 8 }}>
-                  {inviteError}
+                  {toggleError}
                 </div>
               )}
-              {(usersData?.members ?? []).length === 0 ? (
+              {(usersData ?? []).length === 0 ? (
                 <div className="empty-state text-sm">
-                  <p>No users on this project yet.</p>
+                  <p>Nobody has signed in yet.</p>
                 </div>
               ) : (
                 <table className="table-auto">
@@ -179,21 +163,32 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
-                      <th>Role</th>
+                      <th>Access</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(usersData?.members ?? []).map((m) => (
-                      <tr key={m.userId}>
-                        <td>{m.fullName || "—"}</td>
-                        <td>{m.email}</td>
-                        <td>{m.roleName}</td>
+                    {(usersData ?? []).map((u) => (
+                      <tr key={u.id}>
+                        <td>{u.fullName || "—"}</td>
+                        <td>{u.email}</td>
                         <td>
-                          <DeleteButton
-                            action={removeMember.bind(null, project.id, m.userId)}
-                            confirmText="Remove this user from the project?"
-                          />
+                          <span className={`badge ${u.isSuperAdmin ? "badge-purple" : "badge-neutral"}`}>
+                            {u.isSuperAdmin ? "Super Admin" : "Admin"}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            disabled={togglingUserId === u.id}
+                            onClick={() => handleToggleSuperAdmin(u.id, !u.isSuperAdmin)}
+                          >
+                            {togglingUserId === u.id
+                              ? "Saving…"
+                              : u.isSuperAdmin
+                                ? "Remove Super Admin"
+                                : "Make Super Admin"}
+                          </button>
                         </td>
                       </tr>
                     ))}

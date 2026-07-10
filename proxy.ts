@@ -40,13 +40,12 @@ export async function proxy(request: NextRequest) {
   }
 
   const isLoginRoute = request.nextUrl.pathname.startsWith("/login");
-  // set-password is reached via an invite-email link that carries the
-  // session in the URL fragment (invisible to this server-side check) —
-  // the client establishes the session after mount, so this route must be
-  // reachable before `user` can possibly be set here.
-  const isSetPasswordRoute = request.nextUrl.pathname.startsWith("/set-password");
+  // The Microsoft SSO redirect lands here with a code to exchange for a
+  // session — there's no session yet when this route first runs, so it must
+  // be reachable before `user` can possibly be set.
+  const isAuthCallbackRoute = request.nextUrl.pathname.startsWith("/auth/callback");
 
-  if (!user && !isLoginRoute && !isSetPasswordRoute) {
+  if (!user && !isLoginRoute && !isAuthCallbackRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

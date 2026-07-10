@@ -1,6 +1,6 @@
 "use server";
 
-import { getSettingsData, getUsersData } from "@/lib/data/settings";
+import { getSettingsData, getAllUsers } from "@/lib/data/settings";
 
 // Thin Server Action wrapper so the Settings modal (a Client Component)
 // can fetch team/org-unit data on demand — instead of the old approach of
@@ -12,6 +12,6 @@ export async function loadSettingsData(projectId: string) {
 
 // Separate from loadSettingsData: only Super Admins ever open the Users
 // tab, so this shouldn't run on every Settings modal open.
-export async function loadUsersData(projectId: string) {
-  return getUsersData(projectId);
+export async function loadUsersData() {
+  return getAllUsers();
 }

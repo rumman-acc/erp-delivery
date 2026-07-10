@@ -13,6 +13,7 @@ import { MeetingsList } from "@/components/agent/MeetingsList";
 import { LinkedMeetingsList } from "@/components/agent/LinkedMeetingsList";
 import { ReviewQueue } from "@/components/agent/ReviewQueue";
 import { AuditLogTable } from "@/components/agent/AuditLogTable";
+import { AutoPollTrigger } from "@/components/agent/AutoPollTrigger";
 
 const ERROR_MESSAGES: Record<string, string> = {
   microsoft_denied: "Microsoft sign-in was cancelled or denied.",
@@ -68,6 +69,8 @@ export default async function AgentPage({
           <i className="fa fa-circle-xmark" /> {ERROR_MESSAGES[params.agent_error] ?? "Something went wrong."}
         </div>
       )}
+
+      <AutoPollTrigger projectId={project.id} />
 
       <ConnectionCard connection={connection} />
 

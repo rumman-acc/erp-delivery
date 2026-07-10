@@ -3,6 +3,7 @@
 import { refresh, revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireEdit } from "@/lib/permissions";
+import { pollMeetings, type PollResult } from "@/lib/agent/pollMeetings";
 
 function str(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -30,6 +31,17 @@ export async function disconnectMicrosoft() {
 
   revalidatePath("/agent");
   refresh();
+}
+
+// Fired once when the AI Agent page loads (see AutoPollTrigger) so an
+// admin doesn't have to wait for the next scheduled cron tick (vercel.json,
+// every 2 minutes) to see a just-finished meeting's transcript picked up.
+export async function checkMeetingsNow(projectId: string): Promise<PollResult> {
+  await requireEdit(projectId, "agent");
+  const results = await pollMeetings({ projectId });
+  revalidatePath("/agent");
+  refresh();
+  return results;
 }
 
 export async function linkMeeting(projectId: string, formData: FormData) {

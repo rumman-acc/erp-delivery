@@ -7,6 +7,7 @@ const ACTION_LABELS: Record<string, string> = {
   "meeting.linked": "Linked a meeting to this project",
   "suggestions.created": "Extracted suggestions from a transcript",
   "suggestions.batch_reviewed": "Reviewed a suggestion batch",
+  "suggestion.redacted": "Redacted sensitive content in a transcript",
 };
 
 function describe(entry: AuditLogEntry): string {
@@ -20,6 +21,8 @@ function describe(entry: AuditLogEntry): string {
       return `${d.count ?? "?"} suggestion(s)`;
     case "suggestions.batch_reviewed":
       return `${d.approved ?? "?"} approved`;
+    case "suggestion.redacted":
+      return `${d.redactions ?? "?"} pattern(s) — value never logged`;
     default:
       return Object.keys(d).length ? JSON.stringify(d) : "";
   }

@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getValidAccessTokenForConnection } from "@/lib/microsoft/connection";
 import { resolveOnlineMeetingId, listTranscripts, getTranscriptContent } from "@/lib/microsoft/graph";
 import { extractSuggestions, type ExtractedSuggestion } from "@/lib/claude/extractSuggestions";
+import { redactSuggestion } from "@/lib/agent/redact";
 
 export type PollResult = {
   checked: number;
@@ -118,7 +119,17 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
       }
 
       const transcriptText = await getTranscriptContent(accessToken, onlineMeetingId, transcripts[0].id);
-      const extracted = await extractSuggestions(transcriptText);
+      const rawExtracted = await extractSuggestions(transcriptText);
+
+      // Defense-in-depth: scrub common secret/PII patterns from every
+      // extracted field before anything is stored or shown to a reviewer,
+      // regardless of whether the model's own guardrail instructions held.
+      let redactedCount = 0;
+      const extracted = rawExtracted.map((s) => {
+        const { suggestion, count } = redactSuggestion(s as unknown as Record<string, unknown>);
+        redactedCount += count;
+        return suggestion as unknown as ExtractedSuggestion;
+      });
 
       const batchId = crypto.randomUUID();
       if (extracted.length > 0) {
@@ -141,6 +152,19 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
         entity_id: meeting.id,
         details: { batch_id: batchId, count: extracted.length },
       });
+
+      // Visible in the Audit Log so a fired guardrail isn't invisible —
+      // never logs the redacted value itself, only that a pattern matched.
+      if (redactedCount > 0) {
+        await supabase.from("agent_audit_log").insert({
+          project_id: meeting.project_id,
+          actor_type: "agent",
+          action: "suggestion.redacted",
+          entity_type: "meeting_sources",
+          entity_id: meeting.id,
+          details: { batch_id: batchId, redactions: redactedCount },
+        });
+      }
 
       results.fetched++;
       results.suggestionsCreated += extracted.length;

@@ -35,8 +35,10 @@ export async function disconnectMicrosoft() {
 
 // Fired every 5 seconds while the AI Agent page is open (see
 // AutoPollTrigger) so an admin watching the page sees a just-finished
-// meeting's transcript land without reloading, instead of waiting on the
-// every-minute cron backstop (vercel.json) that covers closed tabs.
+// meeting's transcript land without reloading. This carries the real load —
+// the Vercel Hobby plan caps cron jobs at once/day, so the daily cron
+// (vercel.json) is only a distant backstop for closed tabs, not a
+// near-real-time path.
 export async function checkMeetingsNow(projectId: string): Promise<PollResult> {
   await requireEdit(projectId, "agent");
   const results = await pollMeetings({ projectId });

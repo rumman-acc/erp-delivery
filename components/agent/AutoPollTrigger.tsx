@@ -14,12 +14,13 @@ function secondsAgoLabel(lastCheckedAt: number, nowTick: number): string {
 }
 
 // Keeps checking this project's linked, ended meetings for a transcript
-// every 5 seconds for as long as the AI Agent page stays open, instead of
-// only checking once on mount and otherwise waiting on the 1-minute cron
-// backstop (vercel.json) — an admin watching the page after a meeting ends
-// sees the transcript land without ever reloading. Gated on `canEdit`
-// because checkMeetingsNow() requires edit access; a view-only user polling
-// every 5s would just generate a "Forbidden" error each tick for nothing.
+// every 5 seconds for as long as the AI Agent page stays open. This is the
+// real delivery mechanism, not just a nicety — Vercel's Hobby plan caps
+// cron jobs at once/day, so the scheduled cron (vercel.json) can only ever
+// be a backstop for tabs nobody reopens, never a near-real-time path.
+// Gated on `canEdit` because checkMeetingsNow() requires edit access; a
+// view-only user polling every 5s would just generate a "Forbidden" error
+// each tick for nothing.
 export function AutoPollTrigger({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const router = useRouter();
   const [checking, setChecking] = useState(true);

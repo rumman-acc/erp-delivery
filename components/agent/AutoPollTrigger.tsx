@@ -1,40 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { checkMeetingsNow } from "@/lib/actions/agent";
 
-// Fires once when the AI Agent page mounts — checks this project's linked,
-// ended meetings for a transcript immediately, instead of making the admin
-// wait for the next scheduled cron tick (vercel.json runs it every 2 minutes
-// regardless). Non-blocking: the page has already rendered by the time this
-// runs, and router.refresh() re-pulls server data once the check completes.
-export function AutoPollTrigger({ projectId }: { projectId: string }) {
+const POLL_INTERVAL_MS = 5_000;
+
+function secondsAgoLabel(lastCheckedAt: number, nowTick: number): string {
+  const seconds = Math.max(0, Math.round((nowTick - lastCheckedAt) / 1000));
+  if (seconds < 2) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.round(seconds / 60)}m ago`;
+}
+
+// Keeps checking this project's linked, ended meetings for a transcript
+// every 5 seconds for as long as the AI Agent page stays open, instead of
+// only checking once on mount and otherwise waiting on the 1-minute cron
+// backstop (vercel.json) — an admin watching the page after a meeting ends
+// sees the transcript land without ever reloading. Gated on `canEdit`
+// because checkMeetingsNow() requires edit access; a view-only user polling
+// every 5s would just generate a "Forbidden" error each tick for nothing.
+export function AutoPollTrigger({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState<number | null>(null);
+  const inFlight = useRef(false);
 
   useEffect(() => {
+    if (!canEdit) return;
     let cancelled = false;
-    checkMeetingsNow(projectId)
-      .then(() => {
+
+    async function poll() {
+      if (inFlight.current) return; // previous check still running — skip this tick rather than pile up
+      inFlight.current = true;
+      setChecking(true);
+      try {
+        await checkMeetingsNow(projectId);
         if (!cancelled) router.refresh();
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("checkMeetingsNow failed:", err);
-      })
-      .finally(() => {
-        if (!cancelled) setChecking(false);
-      });
+      } finally {
+        inFlight.current = false;
+        if (!cancelled) {
+          setChecking(false);
+          setLastCheckedAt(Date.now());
+        }
+      }
+    }
+
+    poll();
+    const pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+    const tickTimer = setInterval(() => setNowTick(Date.now()), 1000);
     return () => {
       cancelled = true;
+      clearInterval(pollTimer);
+      clearInterval(tickTimer);
     };
-  }, [projectId, router]);
+  }, [projectId, canEdit, router]);
 
-  if (!checking) return null;
+  if (!canEdit) return null;
 
   return (
-    <div className="text-sm text-muted" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-      <i className="fa fa-spinner fa-spin" /> Checking for new transcripts…
+    <div
+      className="text-sm text-muted"
+      style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}
+      role="status"
+    >
+      {checking ? (
+        <>
+          <i className="fa fa-spinner fa-spin" /> Checking for new transcripts…
+        </>
+      ) : (
+        <>
+          <span className="agent-pulse-dot" />
+          AI Agent is watching for new transcripts{lastCheckedAt && nowTick ? ` · checked ${secondsAgoLabel(lastCheckedAt, nowTick)}` : ""}
+        </>
+      )}
     </div>
   );
 }

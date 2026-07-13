@@ -223,3 +223,5 @@ tr:hover .row-actions{opacity:1}
 .permission-grid{width:100%;border-collapse:collapse;font-size:13px}
 .permission-grid th,.permission-grid td{padding:8px 12px;border-bottom:1px solid var(--border);text-align:center}
 .permission-grid td:first-child,.permission-grid th:first-child{text-align:left}
+.agent-pulse-dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--success,#22c55e);animation:agent-pulse 2s ease-in-out infinite}
+@keyframes agent-pulse{0%,100%{opacity:1}50%{opacity:.35}}

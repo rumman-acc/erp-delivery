@@ -7,7 +7,7 @@ import {
   getProjectProcesses,
   getAgentAuditLog,
 } from "@/lib/data/agent";
-import { canViewModule } from "@/lib/permissions";
+import { canViewModule, canEditModule } from "@/lib/permissions";
 import { ConnectionCard } from "@/components/agent/ConnectionCard";
 import { MeetingsList } from "@/components/agent/MeetingsList";
 import { LinkedMeetingsList } from "@/components/agent/LinkedMeetingsList";
@@ -41,7 +41,7 @@ export default async function AgentPage({
     );
   }
 
-  const [connection, meetingsResult, linkedMeetings, suggestionBatches, processes, auditLog, params] = await Promise.all([
+  const [connection, meetingsResult, linkedMeetings, suggestionBatches, processes, auditLog, canEdit, params] = await Promise.all([
     getMyConnection(),
     getMyMeetings(project.id),
     getLinkedMeetings(project.id),
@@ -50,6 +50,7 @@ export default async function AgentPage({
     // RLS restricts this to Super Admin anyway, but skip the round trip for
     // everyone else rather than firing a query that will just come back empty.
     project.isSuperAdmin ? getAgentAuditLog(project.id) : Promise.resolve([]),
+    canEditModule(project.id, "agent"),
     searchParams,
   ]);
 
@@ -70,7 +71,7 @@ export default async function AgentPage({
         </div>
       )}
 
-      <AutoPollTrigger projectId={project.id} />
+      <AutoPollTrigger projectId={project.id} canEdit={canEdit} />
 
       <ConnectionCard connection={connection} />
 

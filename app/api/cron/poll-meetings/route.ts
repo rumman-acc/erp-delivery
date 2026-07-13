@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pollMeetings } from "@/lib/agent/pollMeetings";
 
-// Hit by Vercel Cron every 2 minutes (see vercel.json) — Vercel attaches
+// Hit by Vercel Cron every minute (see vercel.json) — the backstop for when
+// nobody has the AI Agent page open. Vercel attaches
 // `Authorization: Bearer ${CRON_SECRET}` automatically when the env var is
-// set, matching the check below. Also triggered on-demand by
-// checkMeetingsNow() when the AI Agent page loads (see lib/actions/agent.ts).
+// set, matching the check below. While the page is open, AutoPollTrigger
+// polls checkMeetingsNow() every 20 seconds instead (see lib/actions/agent.ts).
 export async function GET(request: NextRequest) {
   const expected = process.env.CRON_SECRET;
   const provided = request.headers.get("authorization");

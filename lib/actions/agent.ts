@@ -33,9 +33,10 @@ export async function disconnectMicrosoft() {
   refresh();
 }
 
-// Fired once when the AI Agent page loads (see AutoPollTrigger) so an
-// admin doesn't have to wait for the next scheduled cron tick (vercel.json,
-// every 2 minutes) to see a just-finished meeting's transcript picked up.
+// Fired every 5 seconds while the AI Agent page is open (see
+// AutoPollTrigger) so an admin watching the page sees a just-finished
+// meeting's transcript land without reloading, instead of waiting on the
+// every-minute cron backstop (vercel.json) that covers closed tabs.
 export async function checkMeetingsNow(projectId: string): Promise<PollResult> {
   await requireEdit(projectId, "agent");
   const results = await pollMeetings({ projectId });

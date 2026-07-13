@@ -97,11 +97,13 @@ export type GraphEvent = {
 };
 
 // plan-agentic.md §5 step 2 — a rolling window, not the admin's whole
-// calendar history, and filtered to Teams online meetings only.
+// calendar history, and filtered to Teams online meetings only. Capped at
+// `now` (not a forward-looking window) — a meeting that hasn't ended yet
+// can never have a transcript, so there's no point surfacing it as linkable.
 export async function listOnlineMeetings(accessToken: string): Promise<GraphEvent[]> {
   const now = new Date();
   const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const end = now.toISOString();
 
   const params = new URLSearchParams({
     startDateTime: start,

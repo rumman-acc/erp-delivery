@@ -59,7 +59,7 @@ export function MeetingsList({ projectId, result }: { projectId: string; result:
   if (result.meetings.length === 0) {
     return (
       <div className="empty-state text-sm">
-        <p>No Teams meetings found in the last 7 days or next 7 days.</p>
+        <p>No finished Teams meetings found in the last 7 days.</p>
       </div>
     );
   }

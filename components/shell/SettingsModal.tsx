@@ -9,11 +9,13 @@ import { updateProjectSettings, deleteOrgUnit } from "@/lib/actions/settings";
 import { deleteTeamMember } from "@/lib/actions/resources";
 import { loadSettingsData, loadUsersData } from "@/lib/actions/settingsData";
 import { setSuperAdmin } from "@/lib/actions/users";
+import { loadMcpTokensData, createMcpToken, revokeMcpToken } from "@/lib/actions/mcp";
+import type { McpTokenRow } from "@/lib/data/mcpTokens";
 import { TeamMemberModal } from "@/components/resources/TeamMemberModal";
 import { OrgUnitModal } from "@/components/shell/OrgUnitModal";
 import { DeleteButton } from "@/components/ui/DeleteButton";
 
-const TABS = ["project", "team", "organization", "users"] as const;
+const TABS = ["project", "team", "organization", "users", "mcp"] as const;
 type Tab = (typeof TABS)[number];
 
 export function SettingsButton({ project }: { project: ProjectConfig }) {
@@ -32,6 +34,16 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
 
+  // MCP personal access tokens (lib/actions/mcp.ts) — org-wide like the
+  // Users tab, lazily fetched only when the tab is opened.
+  const [mcpTokens, setMcpTokens] = useState<McpTokenRow[] | null>(null);
+  const [loadingMcp, setLoadingMcp] = useState(false);
+  const [mcpLabel, setMcpLabel] = useState("");
+  const [creatingToken, setCreatingToken] = useState(false);
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null);
+
   async function handleOpen() {
     setOpen(true);
     if (data) return;
@@ -47,6 +59,37 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
       setUsersData(await loadUsersData());
       setLoadingUsers(false);
     }
+    if (t === "mcp" && !mcpTokens) {
+      setLoadingMcp(true);
+      setMcpTokens(await loadMcpTokensData());
+      setLoadingMcp(false);
+    }
+  }
+
+  async function handleCreateToken() {
+    setCreatingToken(true);
+    setMcpError(null);
+    const result = await createMcpToken(mcpLabel);
+    setCreatingToken(false);
+    if (result?.error) {
+      setMcpError(result.error);
+      return;
+    }
+    setNewToken(result.token ?? null);
+    setMcpLabel("");
+    setMcpTokens(await loadMcpTokensData());
+  }
+
+  async function handleRevokeToken(id: string) {
+    setRevokingTokenId(id);
+    setMcpError(null);
+    const result = await revokeMcpToken(id);
+    setRevokingTokenId(null);
+    if (result?.error) {
+      setMcpError(result.error);
+      return;
+    }
+    setMcpTokens(await loadMcpTokensData());
   }
 
   async function handleToggleSuperAdmin(userId: string, next: boolean) {
@@ -189,6 +232,91 @@ export function SettingsButton({ project }: { project: ProjectConfig }) {
                                 ? "Remove Super Admin"
                                 : "Make Super Admin"}
                           </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )
+        ) : tab === "mcp" ? (
+          loadingMcp ? (
+            <div className="empty-state text-sm">
+              <p>Loading…</p>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              <p className="text-sm text-muted" style={{ marginBottom: 12 }}>
+                Personal access tokens let an external agent-builder platform call this app&apos;s MCP server
+                (<code>/api/mcp</code>) as you. A token can do anything your account can do — treat it like a
+                password.
+              </p>
+              {mcpError && (
+                <div className="text-sm" style={{ color: "var(--danger)", marginBottom: 8 }}>
+                  {mcpError}
+                </div>
+              )}
+              {newToken && (
+                <div
+                  className="text-sm"
+                  style={{ marginBottom: 12, padding: 10, border: "1px solid var(--border)", borderRadius: 6 }}
+                >
+                  <p style={{ marginBottom: 6 }}>Copy this token now — it won&apos;t be shown again.</p>
+                  <code style={{ userSelect: "all", wordBreak: "break-all" }}>{newToken}</code>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <input
+                  className="input"
+                  placeholder="Token label (e.g. Claude Agent Builder)"
+                  value={mcpLabel}
+                  onChange={(e) => setMcpLabel(e.target.value)}
+                />
+                <button className="btn btn-secondary btn-sm" disabled={creatingToken} onClick={handleCreateToken}>
+                  <i className="fa fa-plus" /> {creatingToken ? "Creating…" : "Create Token"}
+                </button>
+              </div>
+              {(mcpTokens ?? []).length === 0 ? (
+                <div className="empty-state text-sm">
+                  <p>No tokens yet.</p>
+                </div>
+              ) : (
+                <table className="table-auto">
+                  <thead>
+                    <tr>
+                      <th>Label</th>
+                      <th>Created</th>
+                      <th>Last Used</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(mcpTokens ?? []).map((t) => (
+                      <tr key={t.id}>
+                        <td>{t.label}</td>
+                        <td>{new Date(t.createdAt).toLocaleDateString()}</td>
+                        <td>{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString() : "Never"}</td>
+                        <td>
+                          <span className={`badge ${t.revokedAt ? "badge-neutral" : "badge-purple"}`}>
+                            {t.revokedAt ? "Revoked" : "Active"}
+                          </span>
+                        </td>
+                        <td>
+                          {!t.revokedAt && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              disabled={revokingTokenId === t.id}
+                              onClick={() => {
+                                if (confirm("Revoke this token? Any integration using it will stop working immediately.")) {
+                                  handleRevokeToken(t.id);
+                                }
+                              }}
+                            >
+                              {revokingTokenId === t.id ? "Revoking…" : "Revoke"}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

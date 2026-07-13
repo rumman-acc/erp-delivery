@@ -38,3 +38,15 @@ export const canViewModule = cache(async (projectId: string, module: Module): Pr
   });
   return !error && !!data;
 });
+
+// Same RPC requireEdit() uses, but returning a boolean instead of throwing —
+// lets the client know up front whether it's worth polling at all, instead
+// of a view-only user's browser hitting "Forbidden" every 20 seconds.
+export const canEditModule = cache(async (projectId: string, module: Module): Promise<boolean> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("can_edit_module", {
+    p_project_id: projectId,
+    p_module: module,
+  });
+  return !error && !!data;
+});

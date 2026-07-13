@@ -73,8 +73,15 @@ export async function getMyMeetings(projectId: string): Promise<MeetingsResult> 
     return { status: "needs_reconnect", meetings: [] };
   }
 
+  // The Graph window is capped at `now` (see listOnlineMeetings), but
+  // calendarView matches on overlap — a meeting that started before `now`
+  // and hasn't ended yet would still come back. Drop those too: no
+  // transcript exists until a meeting actually finishes.
+  const now = Date.now();
+  const endedEvents = events.filter((e) => new Date(toUtcIso(e.end.dateTime)).getTime() <= now);
+
   const supabase = await createClient();
-  const eventIds = events.map((e) => e.id);
+  const eventIds = endedEvents.map((e) => e.id);
 
   const { data: linkedRows } = eventIds.length
     ? await supabase
@@ -92,7 +99,7 @@ export async function getMyMeetings(projectId: string): Promise<MeetingsResult> 
   const projectNameById = new Map((projectRows ?? []).map((p) => [p.id, p.name]));
   const linkedProjectIdByEvent = new Map((linkedRows ?? []).map((r) => [r.graph_event_id, r.project_id]));
 
-  const meetings: MyMeeting[] = events.map((e) => {
+  const meetings: MyMeeting[] = endedEvents.map((e) => {
     const linkedProjectId = linkedProjectIdByEvent.get(e.id) ?? null;
     return {
       graphEventId: e.id,

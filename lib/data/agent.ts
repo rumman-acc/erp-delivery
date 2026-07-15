@@ -40,8 +40,7 @@ export type MyMeeting = {
   start: string;
   end: string;
   joinUrl: string | null;
-  linkedProjectId: string | null;
-  linkedProjectName: string | null;
+  linkedProjects: { id: string; name: string }[];
 };
 
 export type MeetingsResult = { status: "no_connection" | "needs_reconnect" | "ok"; meetings: MyMeeting[] };
@@ -56,9 +55,11 @@ function toUtcIso(graphDateTime: string): string {
 
 // plan-agentic.md §5 step 2 — the admin's own upcoming/recent Teams
 // meetings, cross-referenced against meeting_sources so already-linked
-// meetings (to this or any other project) show clearly instead of being
-// silently double-linkable.
-export async function getMyMeetings(projectId: string): Promise<MeetingsResult> {
+// meetings (to any project) show clearly instead of being silently
+// double-linkable. Global (not project-scoped): a meeting only becomes
+// "about" a project once explicitly linked, via the project picker in
+// MeetingsList — this just lists what's on the admin's own calendar.
+export async function getMyMeetings(): Promise<MeetingsResult> {
   const connection = await getMyConnection();
   if (!connection) return { status: "no_connection", meetings: [] };
 
@@ -86,37 +87,36 @@ export async function getMyMeetings(projectId: string): Promise<MeetingsResult> 
   const { data: linkedRows } = eventIds.length
     ? await supabase
         .from("meeting_sources")
-        .select("graph_event_id,project_id")
+        .select("graph_event_id,meeting_source_projects(project_id,projects(name))")
         .eq("connection_id", valid.connectionId)
         .in("graph_event_id", eventIds)
-    : { data: [] as { graph_event_id: string; project_id: string }[] };
+    : { data: [] as { graph_event_id: string; meeting_source_projects: { project_id: string; projects: { name: string } | { name: string }[] | null }[] }[] };
 
-  const linkedProjectIds = [...new Set((linkedRows ?? []).map((r) => r.project_id))];
-  const { data: projectRows } = linkedProjectIds.length
-    ? await supabase.from("projects").select("id,name").in("id", linkedProjectIds)
-    : { data: [] as { id: string; name: string }[] };
+  const linkedProjectsByEvent = new Map(
+    (linkedRows ?? []).map((r) => [
+      r.graph_event_id,
+      (r.meeting_source_projects ?? [])
+        .map((msp) => {
+          const project = Array.isArray(msp.projects) ? msp.projects[0] : msp.projects;
+          return project ? { id: msp.project_id, name: project.name } : null;
+        })
+        .filter((p): p is { id: string; name: string } => p !== null),
+    ])
+  );
 
-  const projectNameById = new Map((projectRows ?? []).map((p) => [p.id, p.name]));
-  const linkedProjectIdByEvent = new Map((linkedRows ?? []).map((r) => [r.graph_event_id, r.project_id]));
+  const meetings: MyMeeting[] = endedEvents.map((e) => ({
+    graphEventId: e.id,
+    subject: e.subject,
+    organizerEmail: e.organizer?.emailAddress?.address ?? "",
+    start: toUtcIso(e.start.dateTime),
+    end: toUtcIso(e.end.dateTime),
+    joinUrl: e.onlineMeeting?.joinUrl ?? null,
+    linkedProjects: linkedProjectsByEvent.get(e.id) ?? [],
+  }));
 
-  const meetings: MyMeeting[] = endedEvents.map((e) => {
-    const linkedProjectId = linkedProjectIdByEvent.get(e.id) ?? null;
-    return {
-      graphEventId: e.id,
-      subject: e.subject,
-      organizerEmail: e.organizer?.emailAddress?.address ?? "",
-      start: toUtcIso(e.start.dateTime),
-      end: toUtcIso(e.end.dateTime),
-      joinUrl: e.onlineMeeting?.joinUrl ?? null,
-      linkedProjectId,
-      linkedProjectName: linkedProjectId ? projectNameById.get(linkedProjectId) ?? null : null,
-    };
-  });
-
-  // Unlinked meetings and ones already linked to *this* project are the
-  // actionable ones — surface those before meetings linked to other projects.
+  // Unlinked meetings are the actionable ones — surface those first.
   meetings.sort((a, b) => {
-    const rank = (m: MyMeeting) => (m.linkedProjectId === null || m.linkedProjectId === projectId ? 0 : 1);
+    const rank = (m: MyMeeting) => (m.linkedProjects.length === 0 ? 0 : 1);
     return rank(a) - rank(b);
   });
 
@@ -129,25 +129,42 @@ export type LinkedMeeting = {
   startTime: string;
   transcriptStatus: "pending" | "fetched" | "unavailable" | "error";
   transcriptFetchedAt: string | null;
+  projectId: string;
+  projectName: string;
 };
 
-// Visibility into the Phase 3 pipeline for this project — any Admin can see
-// this regardless of who linked the meeting (plan-agentic.md §8).
-export async function getLinkedMeetings(projectId: string): Promise<LinkedMeeting[]> {
+// Visibility into the Phase 3 pipeline across every project the caller can
+// access — any Admin can see this regardless of who linked the meeting or
+// which project it's for (plan-agentic.md §8, generalized: AI Agent is a
+// global page, not project-scoped). A meeting linked to several of the
+// caller's projects shows up once per (meeting, project) pair — one row per
+// project's own stake in it, same as everywhere else project-scoped data
+// is listed.
+export async function getLinkedMeetings(projectIds: string[]): Promise<LinkedMeeting[]> {
+  if (projectIds.length === 0) return [];
   const supabase = await createClient();
   const { data } = await supabase
-    .from("meeting_sources")
-    .select("id,subject,start_time,transcript_status,transcript_fetched_at")
-    .eq("project_id", projectId)
-    .order("start_time", { ascending: false });
+    .from("meeting_source_projects")
+    .select("project_id,projects(name),meeting_sources(id,subject,start_time,transcript_status,transcript_fetched_at)")
+    .in("project_id", projectIds)
+    .order("start_time", { ascending: false, referencedTable: "meeting_sources" });
 
-  return (data ?? []).map((m) => ({
-    id: m.id,
-    subject: m.subject,
-    startTime: m.start_time,
-    transcriptStatus: m.transcript_status as LinkedMeeting["transcriptStatus"],
-    transcriptFetchedAt: m.transcript_fetched_at,
-  }));
+  return (data ?? []).flatMap((r) => {
+    const meeting = Array.isArray(r.meeting_sources) ? r.meeting_sources[0] : r.meeting_sources;
+    const project = Array.isArray(r.projects) ? r.projects[0] : r.projects;
+    if (!meeting) return [];
+    return [
+      {
+        id: meeting.id,
+        subject: meeting.subject,
+        startTime: meeting.start_time,
+        transcriptStatus: meeting.transcript_status as LinkedMeeting["transcriptStatus"],
+        transcriptFetchedAt: meeting.transcript_fetched_at,
+        projectId: r.project_id,
+        projectName: project?.name ?? "Unknown project",
+      },
+    ];
+  });
 }
 
 type Confidence = "high" | "medium" | "low" | null;
@@ -156,30 +173,51 @@ type Common = { id: string; supportingQuote: string | null; confidence: Confiden
 // Mirrors ExtractedSuggestion (lib/claude/extractSuggestions.ts) — the
 // `payload` column stores exactly these fields per type (see
 // pollMeetings.ts's toSuggestionRow), so this is a straight passthrough.
+// Every type except new_project carries its own projectId/projectName —
+// Claude's tagged (or the reviewer's corrected) guess at which of the
+// meeting's linked projects this specific item belongs to, since one
+// meeting can span several.
+type Targeted = { projectId: string; projectName: string };
 export type SuggestionRow =
-  | (Common & { suggestionType: "requirement"; description: string; reqType: string; priority: string })
-  | (Common & { suggestionType: "new_process"; name: string; suggestedCode: string; level: 1 | 2 | 3; description: string; priority: string })
-  | (Common & { suggestionType: "action_item"; title: string; priority: string; dueDate: string | null })
-  | (Common & { suggestionType: "risk"; description: string; category: string; probability: string; impact: string; mitigation: string })
-  | (Common & { suggestionType: "issue"; description: string; category: string; severity: string; rootCause: string });
+  | (Common & Targeted & { suggestionType: "requirement"; description: string; reqType: string; priority: string })
+  | (Common & Targeted & { suggestionType: "new_process"; name: string; suggestedCode: string; level: 1 | 2 | 3; description: string; priority: string })
+  | (Common & Targeted & { suggestionType: "action_item"; title: string; priority: string; dueDate: string | null })
+  | (Common & Targeted & { suggestionType: "risk"; description: string; category: string; probability: string; impact: string; mitigation: string })
+  | (Common & Targeted & { suggestionType: "issue"; description: string; category: string; severity: string; rootCause: string })
+  | (Common & { suggestionType: "new_project"; name: string; description: string; suggestedIssuePrefix: string });
 
 export type SuggestionBatch = {
   batchId: string;
   meetingSourceId: string;
   meetingSubject: string;
   meetingStartTime: string;
+  // Every project this meeting is linked to — powers the per-row project
+  // picker in the Review Queue (a suggestion can only be (re)tagged to one
+  // of these, matching the agent_suggestions_write RLS check).
+  linkedProjects: { id: string; name: string }[];
   suggestions: SuggestionRow[];
 };
 
 // plan-agentic.md §5 step 5 (generalized, §10 step 7) — one batch per
 // meeting, mixing whichever suggestion types were found; any project Admin
-// can review it (not just the admin whose Outlook account sourced the meeting).
-export async function getPendingSuggestionBatches(projectId: string): Promise<SuggestionBatch[]> {
+// can review it (not just the admin whose Outlook account sourced the
+// meeting, nor just an Admin of the specific project a suggestion happens
+// to be tagged to). Global across every project the caller can access.
+//
+// No app-level project_id filter here — RLS (agent_suggestions_select)
+// already scopes this correctly via the meeting's linked projects, which is
+// NOT the same set as "suggestions whose own project_id tag is in
+// projectIds": a suggestion tagged to a project the caller can't view is
+// still visible if the underlying meeting is also linked to a project they
+// can. Filtering by projectIds here would incorrectly hide those.
+export async function getPendingSuggestionBatches(projectIds: string[]): Promise<SuggestionBatch[]> {
+  if (projectIds.length === 0) return [];
   const supabase = await createClient();
   const { data } = await supabase
     .from("agent_suggestions")
-    .select("id,batch_id,meeting_source_id,suggestion_type,payload,supporting_quote,confidence,meeting_sources(subject,start_time)")
-    .eq("project_id", projectId)
+    .select(
+      "id,batch_id,meeting_source_id,project_id,suggestion_type,payload,supporting_quote,confidence,projects(name),meeting_sources(subject,start_time,meeting_source_projects(project_id,projects(name)))"
+    )
     .eq("status", "pending")
     .order("created_at");
 
@@ -187,18 +225,33 @@ export async function getPendingSuggestionBatches(projectId: string): Promise<Su
 
   for (const r of data ?? []) {
     const meeting = Array.isArray(r.meeting_sources) ? r.meeting_sources[0] : r.meeting_sources;
+    const taggedProject = Array.isArray(r.projects) ? r.projects[0] : r.projects;
+
     if (!batches.has(r.batch_id)) {
+      const linkedProjects = (meeting?.meeting_source_projects ?? [])
+        .map((msp) => {
+          const project = Array.isArray(msp.projects) ? msp.projects[0] : msp.projects;
+          return project ? { id: msp.project_id, name: project.name } : null;
+        })
+        .filter((p): p is { id: string; name: string } => p !== null);
+
       batches.set(r.batch_id, {
         batchId: r.batch_id,
         meetingSourceId: r.meeting_source_id,
         meetingSubject: meeting?.subject ?? "Unknown meeting",
         meetingStartTime: meeting?.start_time ?? "",
+        linkedProjects,
         suggestions: [],
       });
     }
+
     const payload = r.payload as Record<string, unknown>;
     const common: Common = { id: r.id, supportingQuote: r.supporting_quote, confidence: r.confidence as Confidence };
-    const row = { ...common, suggestionType: r.suggestion_type, ...payload } as SuggestionRow;
+    const targeted: Targeted = { projectId: r.project_id, projectName: taggedProject?.name ?? "Unknown project" };
+    const row =
+      r.suggestion_type === "new_project"
+        ? ({ ...common, suggestionType: r.suggestion_type, ...payload } as SuggestionRow)
+        : ({ ...common, ...targeted, suggestionType: r.suggestion_type, ...payload } as SuggestionRow);
     batches.get(r.batch_id)!.suggestions.push(row);
   }
 
@@ -207,10 +260,23 @@ export async function getPendingSuggestionBatches(projectId: string): Promise<Su
 
 export type ProcessOption = { id: string; code: string; name: string };
 
-export async function getProjectProcesses(projectId: string): Promise<ProcessOption[]> {
+// Keyed by project id — a "requirement" suggestion needs the picker
+// populated with *its own* project's processes, and batches now span
+// multiple projects at once (see getPendingSuggestionBatches).
+export async function getProjectProcessesMap(projectIds: string[]): Promise<Record<string, ProcessOption[]>> {
+  if (projectIds.length === 0) return {};
   const supabase = await createClient();
-  const { data } = await supabase.from("processes").select("id,code,name").eq("project_id", projectId).order("code");
-  return data ?? [];
+  const { data } = await supabase
+    .from("processes")
+    .select("id,code,name,project_id")
+    .in("project_id", projectIds)
+    .order("code");
+
+  const map: Record<string, ProcessOption[]> = {};
+  for (const p of data ?? []) {
+    (map[p.project_id] ??= []).push({ id: p.id, code: p.code, name: p.name });
+  }
+  return map;
 }
 
 export type AuditLogEntry = {
@@ -230,12 +296,13 @@ export type AuditLogEntry = {
 // events (connect/disconnect) never carry a project_id — they're tied to
 // the admin's own Microsoft account, not any one project — so this also
 // pulls project_id IS NULL rows to keep the trail complete.
-export async function getAgentAuditLog(projectId: string): Promise<AuditLogEntry[]> {
+export async function getAgentAuditLog(projectIds: string[]): Promise<AuditLogEntry[]> {
   const supabase = await createClient();
+  const idList = projectIds.join(",");
   const { data } = await supabase
     .from("agent_audit_log")
     .select("id,created_at,actor_type,action,entity_type,entity_id,details,profiles(full_name,email)")
-    .or(`project_id.eq.${projectId},project_id.is.null`)
+    .or(projectIds.length > 0 ? `project_id.in.(${idList}),project_id.is.null` : "project_id.is.null")
     .order("created_at", { ascending: false })
     .limit(200);
 

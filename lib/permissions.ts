@@ -39,6 +39,25 @@ export const canViewModule = cache(async (projectId: string, module: Module): Pr
   return !error && !!data;
 });
 
+// AI Agent is a global (not per-project) page — whether its sidebar nav item
+// shows at all depends on "does the caller have agent view access on ANY
+// project," not one specific one, so a project-scoped can_view_module check
+// doesn't fit. Mirrors can_view_module's shape without the project filter.
+export const canViewAgentAnyProject = cache(async (): Promise<boolean> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("can_view_agent_any_project");
+  return !error && !!data;
+});
+
+// Project-independent Super Admin check — needed by the global AI Agent page
+// (Audit Log visibility) now that there's no single "current project" to
+// read isSuperAdmin off of.
+export const getIsSuperAdmin = cache(async (): Promise<boolean> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("is_super_admin");
+  return !error && !!data;
+});
+
 // Same RPC requireEdit() uses, but returning a boolean instead of throwing —
 // lets the client know up front whether it's worth polling at all, instead
 // of a view-only user's browser hitting "Forbidden" every 20 seconds.

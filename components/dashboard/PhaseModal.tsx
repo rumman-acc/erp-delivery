@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { upsertPhase } from "@/lib/actions/dashboard";
+import type { Phase } from "@/lib/seed-data";
 
-export function PhaseModal({ projectId }: { projectId: string }) {
+export function PhaseModal({
+  projectId,
+  phase,
+  trigger,
+}: {
+  projectId: string;
+  phase?: Phase;
+  trigger?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -12,6 +21,7 @@ export function PhaseModal({ projectId }: { projectId: string }) {
   async function handleSubmit(formData: FormData) {
     setPending(true);
     setError(null);
+    if (phase) formData.set("id", phase.id);
     const result = await upsertPhase(projectId, formData);
     setPending(false);
     if (result?.error) {
@@ -23,33 +33,38 @@ export function PhaseModal({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <button className="btn btn-secondary btn-sm" onClick={() => setOpen(true)}>
-        <i className="fa fa-plus" /> Add Phase
-      </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add Phase" size="sm">
+      <span onClick={() => setOpen(true)}>
+        {trigger ?? (
+          <button className="btn btn-secondary btn-sm">
+            <i className="fa fa-plus" /> Add Phase
+          </button>
+        )}
+      </span>
+      <Modal open={open} onClose={() => setOpen(false)} title={phase ? "Edit Phase" : "Add Phase"} size="sm">
         <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="form-group">
             <label className="label">Name</label>
-            <input className="input" name="name" required />
+            <input className="input" name="name" defaultValue={phase?.name} required />
           </div>
           <div className="grid-2">
             <div className="form-group">
               <label className="label">Start</label>
-              <input className="input" type="date" name="start" required />
+              <input className="input" type="date" name="start" defaultValue={phase?.start || ""} />
             </div>
             <div className="form-group">
               <label className="label">End</label>
-              <input className="input" type="date" name="end" required />
+              <input className="input" type="date" name="end" defaultValue={phase?.end || ""} />
             </div>
           </div>
+          <p className="text-sm text-muted">Leave Start/End blank if the timeline isn&apos;t set yet.</p>
           <div className="grid-2">
             <div className="form-group">
               <label className="label">Color</label>
-              <input className="input" type="color" name="color" defaultValue="#6366f1" />
+              <input className="input" type="color" name="color" defaultValue={phase?.color || "#6366f1"} />
             </div>
             <div className="form-group">
               <label className="label">Progress (%)</label>
-              <input className="input" type="number" name="progress" min={0} max={100} defaultValue={0} />
+              <input className="input" type="number" name="progress" min={0} max={100} defaultValue={phase?.progress ?? 0} />
             </div>
           </div>
           {error && (

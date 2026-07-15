@@ -4,12 +4,27 @@ import { useState } from "react";
 import { linkMeeting } from "@/lib/actions/agent";
 import { formatDateTime } from "@/lib/ui-helpers";
 import type { MeetingsResult, MyMeeting } from "@/lib/data/agent";
+import type { ProjectSummary } from "@/lib/data/project";
 
-function LinkButton({ projectId, meeting }: { projectId: string; meeting: MyMeeting }) {
+function LinkPicker({ projects, meeting }: { projects: ProjectSummary[]; meeting: MyMeeting }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function handleClick() {
+    if (selected.size === 0) {
+      setError("Pick at least one project");
+      return;
+    }
     setPending(true);
     setError(null);
     const formData = new FormData();
@@ -19,26 +34,40 @@ function LinkButton({ projectId, meeting }: { projectId: string; meeting: MyMeet
     formData.set("start_time", meeting.start);
     formData.set("end_time", meeting.end);
     if (meeting.joinUrl) formData.set("join_url", meeting.joinUrl);
-    const result = await linkMeeting(projectId, formData);
+    const result = await linkMeeting([...selected], formData);
     setPending(false);
     if (result?.error) setError(result.error);
   }
 
+  if (projects.length === 0) {
+    return <span className="text-sm text-muted">No project you can edit</span>;
+  }
+
   return (
-    <div>
-      <button className="btn btn-secondary btn-sm" onClick={handleClick} disabled={pending}>
-        {pending ? "Linking…" : "Link to this project"}
-      </button>
-      {error && (
-        <div className="text-sm" style={{ color: "var(--danger)", marginTop: 4 }}>
-          {error}
-        </div>
-      )}
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxWidth: 320 }}>
+        {projects.map((p) => (
+          <label key={p.id} className="text-sm" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
+            {p.name}
+          </label>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button className="btn btn-secondary btn-sm" onClick={handleClick} disabled={pending}>
+          {pending ? "Linking…" : "Link"}
+        </button>
+        {error && (
+          <span className="text-sm" style={{ color: "var(--danger)" }}>
+            {error}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-export function MeetingsList({ projectId, result }: { projectId: string; result: MeetingsResult }) {
+export function MeetingsList({ projects, result }: { projects: ProjectSummary[]; result: MeetingsResult }) {
   if (result.status === "no_connection") {
     return (
       <div className="empty-state text-sm">
@@ -71,7 +100,7 @@ export function MeetingsList({ projectId, result }: { projectId: string; result:
           <th>Subject</th>
           <th>Organizer</th>
           <th>When</th>
-          <th></th>
+          <th>Projects — check all that apply (e.g. a shared standup)</th>
         </tr>
       </thead>
       <tbody>
@@ -81,12 +110,10 @@ export function MeetingsList({ projectId, result }: { projectId: string; result:
             <td className="text-sm text-muted">{m.organizerEmail}</td>
             <td className="text-sm text-muted">{formatDateTime(m.start)}</td>
             <td>
-              {m.linkedProjectId === null ? (
-                <LinkButton projectId={projectId} meeting={m} />
-              ) : m.linkedProjectId === projectId ? (
-                <span className="badge badge-success">Linked to this project</span>
+              {m.linkedProjects.length === 0 ? (
+                <LinkPicker projects={projects} meeting={m} />
               ) : (
-                <span className="badge badge-neutral">Linked to {m.linkedProjectName ?? "another project"}</span>
+                <span className="badge badge-success">Linked to {m.linkedProjects.map((p) => p.name).join(", ")}</span>
               )}
             </td>
           </tr>

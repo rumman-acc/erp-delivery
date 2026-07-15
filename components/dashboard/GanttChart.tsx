@@ -2,25 +2,35 @@ import type { Phase } from "@/lib/seed-data";
 
 // Ported from the source app's App.Pages.Dashboard.renderGantt() — same
 // scaling math, rendered as JSX <rect>/<text> instead of a template string.
+//
+// Only phases with both a start and end date get a bar — `new Date(null)`
+// silently resolves to the Unix epoch, which would otherwise blow out the
+// chart's date range for every other phase the moment one phase has no
+// timeline yet. Phases without dates simply don't appear here; the table
+// below the chart (app/(app)/dashboard/page.tsx) lists every phase
+// regardless, with a "Not scheduled" badge for these.
 export function GanttChart({ phases }: { phases: Phase[] }) {
-  if (!phases.length) {
+  const scheduled = phases.filter((p) => p.start && p.end);
+
+  if (!scheduled.length) {
     return (
       <div className="empty-state">
         <i className="fa fa-timeline" />
-        <p>No phases defined</p>
+        <p>No scheduled phases yet — set start/end dates on a phase to see it here.</p>
       </div>
     );
   }
 
+  const phasesToRender = scheduled;
   const today = new Date();
-  const allDates = phases.flatMap((p) => [new Date(p.start), new Date(p.end)]);
+  const allDates = phasesToRender.flatMap((p) => [new Date(p.start), new Date(p.end)]);
   const minD = new Date(Math.min(...allDates.map((d) => d.getTime())));
   const maxD = new Date(Math.max(...allDates.map((d) => d.getTime())));
   const totalDays = (maxD.getTime() - minD.getTime()) / (1000 * 86400) || 1;
   const W = 700;
   const rowH = 36;
   const paddingTop = 36;
-  const svgH = paddingTop + phases.length * rowH + 10;
+  const svgH = paddingTop + phasesToRender.length * rowH + 10;
   const toX = (d: Date | string) => ((new Date(d).getTime() - minD.getTime()) / (1000 * 86400) / totalDays) * (W - 160);
   const todayX = Math.max(0, Math.min(W - 160, toX(today)));
 
@@ -45,7 +55,7 @@ export function GanttChart({ phases }: { phases: Phase[] }) {
         </text>
       ))}
       <line x1={160} y1={paddingTop} x2={W} y2={paddingTop} stroke="var(--border)" strokeWidth={0.5} />
-      {phases.map((ph, i) => {
+      {phasesToRender.map((ph, i) => {
         const y = paddingTop + i * rowH;
         const x1 = toX(ph.start) + 160;
         const x2 = toX(ph.end) + 160;

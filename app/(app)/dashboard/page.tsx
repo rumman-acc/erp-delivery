@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getCurrentProject } from "@/lib/data/project";
 import { getDashboardData } from "@/lib/data/dashboard";
 import { getTeamOptions } from "@/lib/data/team";
-import { deleteActionItem, deleteGate } from "@/lib/actions/dashboard";
+import { deleteActionItem, deleteGate, deletePhase } from "@/lib/actions/dashboard";
 import { formatDate, priorityBadgeClass, ragColor, statusBadgeClass } from "@/lib/ui-helpers";
 import { GanttChart } from "@/components/dashboard/GanttChart";
 import { GateModal } from "@/components/dashboard/GateModal";
@@ -63,6 +63,45 @@ export default async function DashboardPage() {
         <div className="gantt-wrap">
           <GanttChart phases={phases} />
         </div>
+        {phases.length > 0 && (
+          <table className="table-auto" style={{ marginTop: 16 }}>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Progress</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {phases.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <span className="rag-dot" style={{ background: p.color }} /> {p.name}
+                  </td>
+                  <td className="text-muted text-sm">
+                    {p.start && p.end ? formatDate(p.start) : <span className="badge badge-neutral">Not scheduled</span>}
+                  </td>
+                  <td className="text-muted text-sm">{p.start && p.end ? formatDate(p.end) : ""}</td>
+                  <td className="text-muted text-sm">{p.progress}%</td>
+                  <td className="row-actions" style={{ display: "flex", gap: 4 }}>
+                    <PhaseModal
+                      projectId={project.id}
+                      phase={p}
+                      trigger={
+                        <button className="icon-btn" style={{ width: 24, height: 24, fontSize: 11 }} title="Edit">
+                          <i className="fa fa-pen" />
+                        </button>
+                      }
+                    />
+                    <DeleteButton action={deletePhase.bind(null, project.id, p.id)} confirmText="Delete this phase?" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="grid-2">

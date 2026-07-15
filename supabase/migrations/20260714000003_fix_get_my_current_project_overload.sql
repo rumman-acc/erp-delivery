@@ -1,0 +1,11 @@
+-- 20260714000002's `create or replace function get_my_current_project(p_project_id
+-- uuid default null)` did not replace the pre-existing zero-argument
+-- get_my_current_project() — Postgres only replaces a function when the
+-- argument signature matches exactly, and a default parameter still counts
+-- as a different signature from no parameter at all. The result was two
+-- overloaded functions coexisting, which makes a zero-arg call (every page
+-- in the app makes one) ambiguous to PostgREST.
+--
+-- The new default-arg version already covers every call shape the old
+-- zero-arg one did, so just drop the stale overload.
+drop function if exists public.get_my_current_project();

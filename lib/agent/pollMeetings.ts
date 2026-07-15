@@ -20,20 +20,39 @@ export type PollResult = {
 // settle it into 'unavailable' instead of polling it forever.
 const NO_TRANSCRIPT_GRACE_MS = 2 * 60 * 60 * 1000;
 
+// One meeting can be linked to several projects (e.g. a shared daily
+// standup) — extraction happens once per meeting, and each suggestion
+// carries its own resolved project_id (Claude's tagged projectName,
+// resolved against this meeting's actual linked projects), rather than one
+// project_id shared by the whole batch. new_project suggestions have no
+// projectName at all (they're proposing a project that doesn't exist yet),
+// so they fall back to the meeting's first linked project purely so the
+// row has a valid FK to attach to for review purposes — commitSuggestionBatch
+// doesn't use it for new_project rows.
 function toSuggestionRow(
   meetingSourceId: string,
-  projectId: string,
+  linkedProjects: { id: string; name: string }[],
   batchId: string,
   s: ExtractedSuggestion
 ) {
   const { suggestionType, supportingQuote, confidence, ...payload } = s;
+  const projectName = "projectName" in s ? s.projectName : undefined;
+  const resolvedProject =
+    (projectName && linkedProjects.find((p) => p.name === projectName)) || linkedProjects[0];
+
+  // projectName isn't part of the stored payload — it was only needed to
+  // resolve project_id, and the reviewer picks/confirms the project via its
+  // own field in the UI, not by re-editing this text.
+  const { projectName: _drop, ...restPayload } = payload as typeof payload & { projectName?: string };
+  void _drop;
+
   return {
     meeting_source_id: meetingSourceId,
-    project_id: projectId,
+    project_id: resolvedProject.id,
     suggestion_type: suggestionType,
     origin: "agent" as const,
-    payload,
-    original_payload: payload,
+    payload: restPayload,
+    original_payload: restPayload,
     supporting_quote: supportingQuote,
     confidence,
     batch_id: batchId,
@@ -41,23 +60,23 @@ function toSuggestionRow(
 }
 
 // Shared by the scheduled cron route (all projects, service-role auth via
-// CRON_SECRET) and the on-demand "check now" Server Action (one project,
-// gated by requireEdit) — same logic either way, just optionally scoped.
-// Detects that a linked, ended meeting now has a transcript available and
-// classifies its content into requirements / new processes / action items /
-// risks / issues (plan-agentic.md §10 step 7, generalized). Deliberately
-// does not persist the raw transcript text — only ever held in memory for
-// the one extraction call.
+// CRON_SECRET) and the on-demand "check now" Server Action (every project
+// the caller can edit 'agent' on) — same logic either way, just optionally
+// scoped. Detects that a linked, ended meeting now has a transcript
+// available and classifies its content into requirements / new processes /
+// action items / risks / issues / new projects (plan-agentic.md §10 step 7,
+// generalized). Deliberately does not persist the raw transcript text —
+// only ever held in memory for the one extraction call.
 export async function pollMeetings(options?: { projectId?: string }): Promise<PollResult> {
   const supabase = createServiceClient();
 
   let query = supabase
     .from("meeting_sources")
-    .select("id,project_id,connection_id,join_url,graph_meeting_id,end_time")
+    .select("id,connection_id,join_url,graph_meeting_id,end_time,meeting_source_projects!inner(project_id,projects(name))")
     .eq("transcript_status", "pending")
     .lt("end_time", new Date().toISOString());
   if (options?.projectId) {
-    query = query.eq("project_id", options.projectId);
+    query = query.eq("meeting_source_projects.project_id", options.projectId);
   }
   const { data: pendingMeetings, error } = await query;
   if (error) throw error;
@@ -74,9 +93,31 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
     return valid?.accessToken ?? null;
   }
 
+  const { data: allProjects } = await supabase.from("projects").select("name");
+  const allProjectNames = (allProjects ?? []).map((p) => p.name);
+
   for (const meeting of pendingMeetings ?? []) {
     results.checked++;
     const pastGracePeriod = Date.now() - new Date(meeting.end_time).getTime() > NO_TRANSCRIPT_GRACE_MS;
+
+    // When options.projectId scopes the query, Postgres still returns every
+    // linked project for a matching meeting (the !inner filter only decides
+    // which meetings match, not which join rows come back) — exactly what
+    // we want, since extraction should see the meeting's full linked set
+    // regardless of which project triggered this check.
+    const linkedProjects = (meeting.meeting_source_projects ?? [])
+      .map((msp) => {
+        const project = Array.isArray(msp.projects) ? msp.projects[0] : msp.projects;
+        return project ? { id: msp.project_id, name: project.name } : null;
+      })
+      .filter((p): p is { id: string; name: string } => p !== null);
+
+    if (linkedProjects.length === 0) {
+      // Shouldn't happen (a meeting only exists once linked to at least one
+      // project), but don't crash the whole run over one malformed row.
+      results.errors++;
+      continue;
+    }
 
     try {
       const accessToken = await accessTokenFor(meeting.connection_id);
@@ -119,7 +160,11 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
       }
 
       const transcriptText = await getTranscriptContent(accessToken, onlineMeetingId, transcripts[0].id);
-      const rawExtracted = await extractSuggestions(transcriptText);
+      const rawExtracted = await extractSuggestions(
+        transcriptText,
+        linkedProjects.map((p) => p.name),
+        allProjectNames
+      );
 
       // Defense-in-depth: scrub common secret/PII patterns from every
       // extracted field before anything is stored or shown to a reviewer,
@@ -135,7 +180,7 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
       if (extracted.length > 0) {
         const { error: insertError } = await supabase
           .from("agent_suggestions")
-          .insert(extracted.map((s) => toSuggestionRow(meeting.id, meeting.project_id, batchId, s)));
+          .insert(extracted.map((s) => toSuggestionRow(meeting.id, linkedProjects, batchId, s)));
         if (insertError) throw insertError;
       }
 
@@ -144,26 +189,31 @@ export async function pollMeetings(options?: { projectId?: string }): Promise<Po
         .update({ transcript_status: "fetched", transcript_fetched_at: new Date().toISOString() })
         .eq("id", meeting.id);
 
-      await supabase.from("agent_audit_log").insert({
-        project_id: meeting.project_id,
-        actor_type: "agent",
-        action: "suggestions.created",
-        entity_type: "meeting_sources",
-        entity_id: meeting.id,
-        details: { batch_id: batchId, count: extracted.length },
-      });
-
-      // Visible in the Audit Log so a fired guardrail isn't invisible —
-      // never logs the redacted value itself, only that a pattern matched.
-      if (redactedCount > 0) {
+      // One audit entry per linked project — matches how linking itself is
+      // logged, and keeps each project's own audit trail complete even
+      // though extraction ran once for the whole meeting.
+      for (const project of linkedProjects) {
         await supabase.from("agent_audit_log").insert({
-          project_id: meeting.project_id,
+          project_id: project.id,
           actor_type: "agent",
-          action: "suggestion.redacted",
+          action: "suggestions.created",
           entity_type: "meeting_sources",
           entity_id: meeting.id,
-          details: { batch_id: batchId, redactions: redactedCount },
+          details: { batch_id: batchId, count: extracted.length },
         });
+
+        // Visible in the Audit Log so a fired guardrail isn't invisible —
+        // never logs the redacted value itself, only that a pattern matched.
+        if (redactedCount > 0) {
+          await supabase.from("agent_audit_log").insert({
+            project_id: project.id,
+            actor_type: "agent",
+            action: "suggestion.redacted",
+            entity_type: "meeting_sources",
+            entity_id: meeting.id,
+            details: { batch_id: batchId, redactions: redactedCount },
+          });
+        }
       }
 
       results.fetched++;

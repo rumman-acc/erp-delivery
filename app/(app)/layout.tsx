@@ -2,7 +2,7 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { Header } from "@/components/shell/Header";
 import { SignOutButton } from "@/components/shell/SignOutButton";
 import { getCurrentProject } from "@/lib/data/project";
-import { canViewModule } from "@/lib/permissions";
+import { canViewAgentAnyProject } from "@/lib/permissions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const project = await getCurrentProject();
@@ -24,7 +24,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
-  const showAgentNav = await canViewModule(project.id, "agent");
+  // AI Agent's nav visibility no longer depends on whichever project happens
+  // to be "current" — it's a global page now (app/(app)/agent/page.tsx), so
+  // it shows whenever the caller has agent view access on ANY project.
+  const showAgentNav = await canViewAgentAnyProject();
 
   return (
     <>

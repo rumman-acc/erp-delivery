@@ -1,13 +1,13 @@
-import { getCurrentProject } from "@/lib/data/project";
+import { getMyProjects } from "@/lib/data/project";
 import {
   getMyConnection,
   getMyMeetings,
   getLinkedMeetings,
   getPendingSuggestionBatches,
-  getProjectProcesses,
+  getProjectProcessesMap,
   getAgentAuditLog,
 } from "@/lib/data/agent";
-import { canViewModule, canEditModule } from "@/lib/permissions";
+import { canViewAgentAnyProject, canViewModule, canEditModule, getIsSuperAdmin } from "@/lib/permissions";
 import { ConnectionCard } from "@/components/agent/ConnectionCard";
 import { MeetingsList } from "@/components/agent/MeetingsList";
 import { LinkedMeetingsList } from "@/components/agent/LinkedMeetingsList";
@@ -21,38 +21,53 @@ const ERROR_MESSAGES: Record<string, string> = {
   connection_failed: "Something went wrong finishing the connection. Please try again.",
 };
 
+// AI Agent is a global page, not scoped to whichever project happens to be
+// "current" — a standup can be about any project, and an admin reviewing
+// suggestions shouldn't have to switch projects to see what's pending
+// elsewhere. Every list here spans every project the caller can access.
 export default async function AgentPage({
   searchParams,
 }: {
   searchParams: Promise<{ connected?: string; agent_error?: string }>;
 }) {
-  const project = await getCurrentProject();
-  if (!project) return null;
-
-  const canView = await canViewModule(project.id, "agent");
+  const canView = await canViewAgentAnyProject();
   if (!canView) {
     return (
       <div className="page active" id="page-agent">
         <div className="empty-state">
           <i className="fa fa-lock" />
-          <p>You don&apos;t have access to the AI Agent module on this project.</p>
+          <p>You don&apos;t have access to the AI Agent module on any project.</p>
         </div>
       </div>
     );
   }
 
-  const [connection, meetingsResult, linkedMeetings, suggestionBatches, processes, auditLog, canEdit, params] = await Promise.all([
+  // getMyProjects() only reflects project membership, not per-module
+  // permission — a project's own module matrix can still deny 'agent' view
+  // to a given role (same as any other module), so filter down to the
+  // projects this caller can actually see agent data for before fetching
+  // anything scoped to them.
+  const allProjects = await getMyProjects();
+  const viewFlags = await Promise.all(allProjects.map((p) => canViewModule(p.id, "agent")));
+  const viewableProjects = allProjects.filter((_, i) => viewFlags[i]);
+  const projectIds = viewableProjects.map((p) => p.id);
+
+  const editFlags = await Promise.all(viewableProjects.map((p) => canEditModule(p.id, "agent")));
+  const editableProjects = viewableProjects.filter((_, i) => editFlags[i]);
+
+  const [connection, meetingsResult, linkedMeetings, suggestionBatches, processesMap, isSuperAdmin, params] = await Promise.all([
     getMyConnection(),
-    getMyMeetings(project.id),
-    getLinkedMeetings(project.id),
-    getPendingSuggestionBatches(project.id),
-    getProjectProcesses(project.id),
-    // RLS restricts this to Super Admin anyway, but skip the round trip for
-    // everyone else rather than firing a query that will just come back empty.
-    project.isSuperAdmin ? getAgentAuditLog(project.id) : Promise.resolve([]),
-    canEditModule(project.id, "agent"),
+    getMyMeetings(),
+    getLinkedMeetings(projectIds),
+    getPendingSuggestionBatches(projectIds),
+    getProjectProcessesMap(projectIds),
+    getIsSuperAdmin(),
     searchParams,
   ]);
+
+  // RLS restricts the audit log to Super Admin anyway, but skip the round
+  // trip for everyone else rather than firing a query that just comes back empty.
+  const auditLog = isSuperAdmin ? await getAgentAuditLog(projectIds) : [];
 
   return (
     <div className="page active" id="page-agent">
@@ -71,7 +86,10 @@ export default async function AgentPage({
         </div>
       )}
 
-      <AutoPollTrigger projectId={project.id} canEdit={canEdit} />
+      <AutoPollTrigger
+        canEdit={editableProjects.length > 0}
+        hasPendingMeetings={linkedMeetings.some((m) => m.transcriptStatus === "pending")}
+      />
 
       <ConnectionCard connection={connection} />
 
@@ -81,7 +99,7 @@ export default async function AgentPage({
             <i className="fa fa-calendar-days" /> Your Meetings
           </span>
         </div>
-        <MeetingsList projectId={project.id} result={meetingsResult} />
+        <MeetingsList projects={editableProjects} result={meetingsResult} />
       </div>
 
       <div className="card" style={{ marginBottom: 24 }}>
@@ -97,10 +115,10 @@ export default async function AgentPage({
         <h3 style={{ fontSize: 14, marginBottom: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
           <i className="fa fa-list-check" /> Review Queue
         </h3>
-        <ReviewQueue projectId={project.id} batches={suggestionBatches} processes={processes} />
+        <ReviewQueue batches={suggestionBatches} processesMap={processesMap} />
       </div>
 
-      {project.isSuperAdmin && (
+      {isSuperAdmin && (
         <div className="card">
           <div className="card-header">
             <span className="card-title">

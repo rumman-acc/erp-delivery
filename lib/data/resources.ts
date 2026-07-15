@@ -1,6 +1,24 @@
 import { createClient } from "@/lib/supabase/server";
 import type { HoursLogEntry, TeamMember } from "@/lib/seed-data";
 
+export type KnownPerson = { name: string; role: string; location: string };
+
+// Every person who's a team_members row on ANY project the caller can
+// access, deduped by name — powers "copy from existing person" in
+// TeamMemberModal so adding someone to a project they're not yet on doesn't
+// mean re-typing their name/role/location from scratch (Resources page is
+// global now, listing every project's roster together).
+export async function getKnownPeople(): Promise<KnownPerson[]> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("team_members").select("name,role,location").order("name");
+
+  const seen = new Map<string, KnownPerson>();
+  for (const m of data ?? []) {
+    if (!seen.has(m.name)) seen.set(m.name, { name: m.name, role: m.role, location: m.location ?? "" });
+  }
+  return [...seen.values()];
+}
+
 export async function getResourcesData(projectId: string) {
   const supabase = await createClient();
 

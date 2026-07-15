@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", icon: "fa-gauge-high", label: "Dashboard" },
+  { href: "/projects", icon: "fa-folder-tree", label: "Main Dashboard" },
+  { href: "/dashboard", icon: "fa-gauge-high", label: "Project Dashboard" },
   { href: "/scope", icon: "fa-sitemap", label: "Scope & BPM" },
   { href: "/kanban", icon: "fa-table-columns", label: "Kanban Board" },
   { href: "/resources", icon: "fa-users", label: "Resources" },
@@ -20,7 +21,7 @@ export function Sidebar({ showAgentNav }: { showAgentNav: boolean }) {
     <div id="sidebar">
       <div className="sidebar-logo">
         <i className="fa-solid fa-diagram-project" />
-        ERP Delivery
+        Accelance Tracker
       </div>
       <nav>
         {items.map((item) => (

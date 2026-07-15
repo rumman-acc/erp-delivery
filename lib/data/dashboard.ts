@@ -37,8 +37,8 @@ export async function getDashboardData(projectId: string) {
   const phases: Phase[] = (phasesRes.data ?? []).map((p) => ({
     id: p.id,
     name: p.name,
-    start: p.start_date,
-    end: p.end_date,
+    start: p.start_date ?? "",
+    end: p.end_date ?? "",
     color: p.color ?? "#6366f1",
     progress: p.progress,
   }));

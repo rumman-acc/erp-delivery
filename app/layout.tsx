@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ERP Delivery App",
-  description: "ERP Delivery App — D365 BC Implementation tracker",
+  title: "Accelance Tracker",
+  description: "Accelance Tracker — project delivery tracker",
 };
 
 // Runs before paint so the stored theme applies immediately — the source

@@ -35,7 +35,7 @@ export default function LoginPage() {
       <div className="card auth-card">
         <div className="card-header">
           <span className="card-title">
-            <i className="fa-solid fa-diagram-project" /> ERP Delivery
+            <i className="fa-solid fa-diagram-project" /> Accelance Tracker
           </span>
         </div>
         <p className="text-sm text-muted" style={{ marginBottom: 16 }}>

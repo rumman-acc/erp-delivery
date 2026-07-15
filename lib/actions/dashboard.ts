@@ -19,8 +19,8 @@ export async function upsertPhase(projectId: string, formData: FormData) {
   const row = {
     project_id: projectId,
     name: str(formData, "name"),
-    start_date: str(formData, "start"),
-    end_date: str(formData, "end"),
+    start_date: str(formData, "start") || null,
+    end_date: str(formData, "end") || null,
     color: str(formData, "color") || "#6366f1",
     progress: Number(formData.get("progress") ?? 0),
   };
@@ -29,6 +29,15 @@ export async function upsertPhase(projectId: string, formData: FormData) {
     ? await supabase.from("phases").update(row).eq("id", id).eq("project_id", projectId)
     : await supabase.from("phases").insert(row);
 
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard");
+  refresh();
+}
+
+export async function deletePhase(projectId: string, id: string) {
+  await requireEdit(projectId, "dashboard");
+  const supabase = await createClient();
+  const { error } = await supabase.from("phases").delete().eq("id", id).eq("project_id", projectId);
   if (error) return { error: error.message };
   revalidatePath("/dashboard");
   refresh();

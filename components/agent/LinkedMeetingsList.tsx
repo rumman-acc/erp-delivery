@@ -19,7 +19,7 @@ export function LinkedMeetingsList({ meetings }: { meetings: LinkedMeeting[] }) 
   if (meetings.length === 0) {
     return (
       <div className="empty-state text-sm">
-        <p>No meetings linked to this project yet — link one from &quot;Your Meetings&quot; above.</p>
+        <p>No meetings linked to any project yet — link one from &quot;Your Meetings&quot; above.</p>
       </div>
     );
   }
@@ -29,6 +29,7 @@ export function LinkedMeetingsList({ meetings }: { meetings: LinkedMeeting[] }) 
       <thead>
         <tr>
           <th>Subject</th>
+          <th>Project</th>
           <th>When</th>
           <th>Status</th>
         </tr>
@@ -37,6 +38,7 @@ export function LinkedMeetingsList({ meetings }: { meetings: LinkedMeeting[] }) 
         {meetings.map((m) => (
           <tr key={m.id}>
             <td>{m.subject}</td>
+            <td className="text-sm text-muted">{m.projectName}</td>
             <td className="text-sm text-muted">{formatDateTime(m.startTime)}</td>
             <td>
               <span className={`badge ${STATUS_BADGE[m.transcriptStatus]}`}>{STATUS_LABEL[m.transcriptStatus]}</span>

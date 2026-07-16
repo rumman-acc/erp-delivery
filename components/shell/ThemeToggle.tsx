@@ -3,8 +3,8 @@
 import { useState } from "react";
 
 function getInitialTheme(): "dark" | "light" {
-  if (typeof window === "undefined") return "dark";
-  return (localStorage.getItem("erp-theme") as "dark" | "light") || "dark";
+  if (typeof window === "undefined") return "light";
+  return (localStorage.getItem("erp-theme") as "dark" | "light") || "light";
 }
 
 export function ThemeToggle() {

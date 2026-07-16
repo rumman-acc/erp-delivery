@@ -14,7 +14,7 @@ const themeInitScript = `
 (function () {
   try {
     var stored = localStorage.getItem('erp-theme');
-    document.documentElement.className = stored === 'light' ? 'light' : 'dark';
+    document.documentElement.className = stored === 'dark' ? 'dark' : 'light';
   } catch (e) {}
 })();
 `;
@@ -25,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" className="light" suppressHydrationWarning>
       <head>
         <link
           rel="stylesheet"

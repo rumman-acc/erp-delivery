@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { refresh, revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canEditModule } from "@/lib/permissions";
@@ -93,27 +94,31 @@ export async function linkMeeting(projectIds: string[], formData: FormData) {
   const graphEventId = str(formData, "graph_event_id");
   const subject = str(formData, "subject");
 
+  // id generated client-side (rather than letting the DB default it and
+  // reading it back via .select()) because meeting_sources_select requires a
+  // meeting_source_projects row to exist before a row is visible — asking
+  // for the id back via RETURNING right after this insert, before any
+  // project link exists, would fail that same RLS check.
+  //
   // unique(connection_id, graph_event_id) means re-clicking an already-linked
   // meeting (e.g. a double click) fails loudly instead of creating a duplicate.
-  const { data: meetingSource, error: meetingError } = await supabase
-    .from("meeting_sources")
-    .insert({
-      connection_id: connection.id,
-      graph_event_id: graphEventId,
-      subject,
-      organizer_email: str(formData, "organizer_email"),
-      start_time: str(formData, "start_time"),
-      end_time: str(formData, "end_time") || null,
-      join_url: str(formData, "join_url") || null,
-      linked_by: userId,
-    })
-    .select("id")
-    .single();
+  const meetingSourceId = randomUUID();
+  const { error: meetingError } = await supabase.from("meeting_sources").insert({
+    id: meetingSourceId,
+    connection_id: connection.id,
+    graph_event_id: graphEventId,
+    subject,
+    organizer_email: str(formData, "organizer_email"),
+    start_time: str(formData, "start_time"),
+    end_time: str(formData, "end_time") || null,
+    join_url: str(formData, "join_url") || null,
+    linked_by: userId,
+  });
   if (meetingError) return { error: meetingError.message };
 
   const { error: linkError } = await supabase
     .from("meeting_source_projects")
-    .insert(projectIds.map((projectId) => ({ meeting_source_id: meetingSource.id, project_id: projectId, linked_by: userId })));
+    .insert(projectIds.map((projectId) => ({ meeting_source_id: meetingSourceId, project_id: projectId, linked_by: userId })));
   if (linkError) return { error: linkError.message };
 
   for (const projectId of projectIds) {

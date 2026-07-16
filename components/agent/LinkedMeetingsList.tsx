@@ -36,7 +36,7 @@ export function LinkedMeetingsList({ meetings }: { meetings: LinkedMeeting[] }) 
       </thead>
       <tbody>
         {meetings.map((m) => (
-          <tr key={m.id}>
+          <tr key={`${m.id}-${m.projectId}`}>
             <td>{m.subject}</td>
             <td className="text-sm text-muted">{m.projectName}</td>
             <td className="text-sm text-muted">{formatDateTime(m.startTime)}</td>
